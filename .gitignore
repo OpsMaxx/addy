@@ -1,0 +1,14 @@
+# Build output
+/dist/
+/addy
+/addy.exe
+
+# Local development state
+/.dev/
+*.db
+*.db-shm
+*.db-wal
+
+# Editor / OS
+.DS_Store
+*.swp

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The branding check runs `git grep` and `git ls-files` over the
+          # tracked set, so it needs real history rather than a blob-less
+          # checkout. fetch-depth 1 is enough: it searches the checked-out
+          # commit, not the log.
+          fetch-depth: 1
+
+      # Read the toolchain from the module itself, so the two can never drift
+      # apart -- the same pin the sibling repo uses for its Go sidecar.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # Tests run BEFORE any build, deliberately. A red test should fail the
+      # run rather than produce an artifact nobody checked.
+      - name: Test
+        run: go test ./...
+
+      # The reason this is here rather than "nice to have later": the HPKE
+      # library carries GO-2026-4550 / CVE-2026-1229 below v1.6.3. A pin that
+      # drifts under it is a silent downgrade of the one primitive the whole
+      # product's confidentiality claim rests on, and nothing else in the
+      # pipeline would notice.
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      - name: Build
+        run: go build ./...
