@@ -29,12 +29,13 @@ var migrations = []string{
 	// is refused.
 	`CREATE TABLE domains (
 		hostname   TEXT PRIMARY KEY,
-		route      TEXT NOT NULL,
+		mode       TEXT NOT NULL,
 		backend    TEXT NOT NULL DEFAULT '',
+		http80     TEXT NOT NULL DEFAULT '',
 		added_at   INTEGER NOT NULL,
-		CHECK (route IN ('local', 'proxy', 'passthrough')),
+		CHECK (mode IN ('terminate', 'proxy', 'passthrough')),
 		CHECK (hostname = lower(hostname)),
-		CHECK (route = 'local' OR backend <> '')
+		CHECK (mode = 'terminate' OR backend <> '')
 	)`,
 
 	// 2. Instance-wide flags and small scalars.

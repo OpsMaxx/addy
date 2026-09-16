@@ -122,7 +122,7 @@ func TestTxRollsBackOnError(t *testing.T) {
 
 	err := db.Tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO domains (hostname, route, backend, added_at) VALUES (?, 'local', '', ?)`,
+			`INSERT INTO domains (hostname, mode, backend, added_at) VALUES (?, 'terminate', '', ?)`,
 			"a.example", time.Now().Unix()); err != nil {
 			return err
 		}
@@ -157,7 +157,7 @@ func TestTxRollsBackOnPanicAndTheWriterSurvives(t *testing.T) {
 		}()
 		_ = db.Tx(ctx, func(tx *sql.Tx) error {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO domains (hostname, route, backend, added_at) VALUES (?, 'local', '', ?)`,
+				`INSERT INTO domains (hostname, mode, backend, added_at) VALUES (?, 'terminate', '', ?)`,
 				"b.example", time.Now().Unix()); err != nil {
 				t.Errorf("insert: %v", err)
 			}
@@ -171,7 +171,7 @@ func TestTxRollsBackOnPanicAndTheWriterSurvives(t *testing.T) {
 	defer cancel()
 	err := db.Tx(deadline, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(deadline,
-			`INSERT INTO domains (hostname, route, backend, added_at) VALUES (?, 'local', '', ?)`,
+			`INSERT INTO domains (hostname, mode, backend, added_at) VALUES (?, 'terminate', '', ?)`,
 			"c.example", time.Now().Unix())
 		return err
 	})
@@ -198,20 +198,20 @@ func TestDomainsRejectsRowsTheRouterCouldNotUse(t *testing.T) {
 	now := time.Now().Unix()
 
 	cases := []struct {
-		name                     string
-		hostname, route, backend string
+		name                    string
+		hostname, mode, backend string
 	}{
-		{"an unknown route", "a.example", "elsewhere", "127.0.0.1:9000"},
+		{"an unknown mode", "a.example", "elsewhere", "127.0.0.1:9000"},
 		{"a proxy row with no backend", "b.example", "proxy", ""},
 		{"a passthrough row with no backend", "c.example", "passthrough", ""},
-		{"a hostname that is not lowercased", "D.example", "local", ""},
+		{"a hostname that is not lowercased", "D.example", "terminate", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := db.Tx(ctx, func(tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx,
-					`INSERT INTO domains (hostname, route, backend, added_at) VALUES (?, ?, ?, ?)`,
-					c.hostname, c.route, c.backend, now)
+					`INSERT INTO domains (hostname, mode, backend, added_at) VALUES (?, ?, ?, ?)`,
+					c.hostname, c.mode, c.backend, now)
 				return err
 			})
 			if err == nil {
@@ -223,7 +223,7 @@ func TestDomainsRejectsRowsTheRouterCouldNotUse(t *testing.T) {
 	// And the shape that must still work.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO domains (hostname, route, backend, added_at) VALUES (?, 'proxy', ?, ?)`,
+			`INSERT INTO domains (hostname, mode, backend, added_at) VALUES (?, 'proxy', ?, ?)`,
 			"vault.example", "127.0.0.1:8222", now)
 		return err
 	}); err != nil {
