@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -226,5 +228,48 @@ func TestDomainsRejectsRowsTheRouterCouldNotUse(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatalf("a valid proxy row was rejected: %v", err)
+	}
+}
+
+// The data directory is 0700, but a mode that relies on a second control
+// staying right is not a control. These files hold the roster chain and every
+// device's public key.
+func TestDatabaseFilesAreNotReadableByOthers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits do not apply")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "addy.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Write something, so the -wal file definitely exists by the time we look.
+	if err := db.Tx(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO instance (key, value, updated_at) VALUES ('probe', '1', 0)`)
+		return err
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	seen := 0
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			t.Fatalf("stat %s: %v", e.Name(), err)
+		}
+		seen++
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			t.Errorf("%s is mode %04o; group and other must have no access", e.Name(), mode)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no database files found; the test is looking in the wrong place")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -96,7 +97,41 @@ func Open(path string) (*DB, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := db.restrict(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
+}
+
+// restrict narrows the database files to 0600.
+//
+// SQLite creates them with 0644 minus the process umask, and the data
+// directory being 0700 is not a reason to leave them that way: the directory's
+// mode is one `chmod` by a future operator away from changing, and what is
+// inside is the roster chain and every device's public key -- exactly the
+// metadata the threat model commits to minimising. Defence that depends on a
+// second control staying right is not defence.
+//
+// The -wal and -shm sidecars are included because SQLite copies the main
+// database's permissions to them when it creates them, which means it copies
+// whatever they were BEFORE this ran.
+func (d *DB) restrict() error {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		path := d.path + suffix
+		if _, err := os.Stat(path); err != nil {
+			// -wal and -shm exist only while a connection is open, and on some
+			// platforms not even then. Absent is not a failure.
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("checking %s: %w", path, err)
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			return fmt.Errorf("securing %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 // Close releases both handles. The first error is returned but both are always
