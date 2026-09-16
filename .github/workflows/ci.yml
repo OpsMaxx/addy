@@ -55,5 +55,21 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           "$(go env GOPATH)/bin/govulncheck" ./...
 
-      - name: Build
-        run: go build ./...
+      # Cross-compile every published target, not just this runner's. A target
+      # that only breaks on another GOOS is otherwise discovered by the release
+      # workflow, at which point the tag already exists.
+      - name: Cross-compile
+        run: bash scripts/build.sh
+
+      # The build script claims byte-reproducibility, which is what makes the
+      # SHA-256 table in the release notes worth printing. An unverified claim
+      # about reproducibility is worse than none, so CI runs it twice and
+      # compares.
+      - name: Reproducible
+        run: |
+          cp dist/SHA256SUMS /tmp/sums-first
+          bash scripts/build.sh >/dev/null
+          if ! diff -u /tmp/sums-first dist/SHA256SUMS; then
+            echo "::error::two builds of the same commit produced different binaries"
+            exit 1
+          fi
