@@ -223,3 +223,8 @@ func NewDeviceKeys() (*DeviceKeys, error) {
 		Enc:      enc,
 	}, nil
 }
+
+// x25519Public turns 32 raw bytes into an X25519 public key, validating them.
+func x25519Public(b []byte) (*ecdh.PublicKey, error) {
+	return ecdh.X25519().NewPublicKey(b)
+}
