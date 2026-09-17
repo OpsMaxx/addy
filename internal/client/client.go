@@ -295,9 +295,13 @@ func (c *Client) AppendRoster(e protocol.Entry) error {
 	return nil
 }
 
-// SendFrame publishes an opaque signalling frame.
-func (c *Client) SendFrame(frame []byte) error {
-	resp, err := c.do(http.MethodGet, "/v1/signal", map[string]string{
+// SendFrame publishes an opaque signalling frame to one peer device.
+//
+// A frame names the device it is for. There is no "broadcast" and no way to ask
+// for somebody else's mailbox, which is what stops one device draining
+// another's.
+func (c *Client) SendFrame(toDevice []byte, frame []byte) error {
+	resp, err := c.do(http.MethodGet, "/v1/signal?to="+hex.EncodeToString(toDevice), map[string]string{
 		"frame": base64.StdEncoding.EncodeToString(frame),
 	})
 	if err != nil {
@@ -335,4 +339,47 @@ func (c *Client) NextFrame() ([]byte, error) {
 func readErr(r io.Reader) string {
 	b, _ := io.ReadAll(io.LimitReader(r, 4<<10))
 	return string(bytes.TrimSpace(b))
+}
+
+// The pairing rendezvous. A joining device has no session and does not know the
+// account id, so these do not go through do() and carry no authorization.
+
+// SendPairFrame publishes into a pairing room.
+func (c *Client) SendPairFrame(role string, pairingID []byte, frame []byte) error {
+	body, _ := json.Marshal(map[string]string{
+		"frame": base64.StdEncoding.EncodeToString(frame),
+	})
+	url := c.BaseURL + "/v1/pair/" + hex.EncodeToString(pairingID) + "?as=" + role
+	resp, err := c.HTTP.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("client: sending a pairing frame: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("client: sending a pairing frame: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	return nil
+}
+
+// NextPairFrame waits for one.
+func (c *Client) NextPairFrame(role string, pairingID []byte) ([]byte, error) {
+	url := c.BaseURL + "/v1/pair/" + hex.EncodeToString(pairingID) + "?as=" + role
+	resp, err := c.HTTP.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("client: waiting for a pairing frame: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("client: waiting for a pairing frame: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		Frame string `json:"frame"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return base64.StdEncoding.DecodeString(out.Frame)
 }

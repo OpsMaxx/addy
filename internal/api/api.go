@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/opsmaxx/addy/internal/store"
 )
@@ -21,6 +22,12 @@ import (
 type Server struct {
 	DB  *store.DB
 	Log *slog.Logger
+
+	// PollWait is how long a signalling read blocks before answering "nothing
+	// arrived". Long, because a short one turns every idle device into a
+	// request loop; configurable, because a test that waits it out is a test
+	// somebody deletes.
+	PollWait time.Duration
 
 	auth *authState
 	hub  *hub
@@ -31,7 +38,7 @@ func New(db *store.DB, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{DB: db, Log: log, auth: newAuthState(), hub: newHub()}
+	return &Server{DB: db, Log: log, PollWait: defaultPollWait, auth: newAuthState(), hub: newHub()}
 }
 
 // Handler returns the routes.
@@ -44,6 +51,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/account", s.createAccount)
 	mux.HandleFunc("POST /v1/auth/challenge", s.challenge)
 	mux.HandleFunc("POST /v1/auth/login", s.login)
+
+	// The pairing rendezvous is unauthenticated because a joining device is not
+	// in the roster yet and does not know the account id. See signal.go for
+	// what that costs and how it is bounded.
+	mux.HandleFunc("GET /v1/pair/{pairing}", s.pairRendezvous)
+	mux.HandleFunc("POST /v1/pair/{pairing}", s.pairRendezvous)
 
 	// Authenticated. Every one of these carries a request-authorization
 	// signature over its method, path and body, so an authorization for a GET

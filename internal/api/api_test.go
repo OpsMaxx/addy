@@ -9,6 +9,7 @@ import (
 
 	"github.com/opsmaxx/addy/internal/api"
 	"github.com/opsmaxx/addy/internal/client"
+	"github.com/opsmaxx/addy/internal/protocol"
 	"github.com/opsmaxx/addy/internal/store"
 )
 
@@ -24,7 +25,12 @@ func instance(t *testing.T) (*httptest.Server, *store.DB) {
 	// TLS key, so a client cannot log in to something that presents no
 	// certificate. That is the point of the binding -- a login captured from
 	// one instance must not replay against another.
-	srv := httptest.NewTLSServer(api.New(db, nil).Handler())
+	a := api.New(db, nil)
+	// A short poll, so a test that legitimately reads an empty mailbox does not
+	// wait out the production timeout. A test that takes twenty-five seconds is
+	// a test somebody deletes.
+	a.PollWait = 250 * time.Millisecond
+	srv := httptest.NewTLSServer(a.Handler())
 	t.Cleanup(srv.Close)
 	return srv, db
 }
@@ -160,8 +166,14 @@ func TestTheSignallingRelayCarriesFramesWithinAnAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []byte("an opaque pairing frame")
-	if err := c.SendFrame(want); err != nil {
+	// Every mailbox is DIRECTED, so a device cannot receive its own frame. A
+	// first draft of the relay had one queue per room and this test passed by
+	// echoing -- which is the difference between a relay and a loopback, and
+	// the end-to-end pairing test found it immediately.
+	self := c.Device.Sign.Public().(ed25519.PublicKey)
+
+	want := []byte("an opaque signalling frame")
+	if err := c.SendFrame(self, want); err != nil {
 		t.Fatalf("SendFrame: %v", err)
 	}
 	got, err := c.NextFrame()
@@ -170,6 +182,22 @@ func TestTheSignallingRelayCarriesFramesWithinAnAccount(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Errorf("frame = %q, want %q", got, want)
+	}
+
+	// A frame addressed to somebody else must not arrive here.
+	other, err := protocol.NewDeviceKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SendFrame(other.Sign.Public().(ed25519.PublicKey), []byte("not for you")); err != nil {
+		t.Fatalf("SendFrame to a peer: %v", err)
+	}
+	stray, err := c.NextFrame()
+	if err != nil {
+		t.Fatalf("NextFrame: %v", err)
+	}
+	if stray != nil {
+		t.Errorf("a frame addressed to another device arrived here: %q", stray)
 	}
 }
 
