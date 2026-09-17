@@ -41,7 +41,52 @@ holder of `AK_n` arrives named whatever the attacker likes, so under
 confirmation the label was simultaneously the aid and the attack. Under
 selection it can only fail to persuade.
 
-### D2. Labels stay readable across rotations — and they are load-bearing
+### D2 (REVISED). A `deviceNames` collection carries the CURRENT names; the
+### `K_label` split is demoted to a fallback
+
+**Superseded the original D2 after finding F1 was pushed on.** The original
+decision was the `K_label` split alone. It is still sound and still cheap, but it
+solves the wrong half of the problem: it makes **birth names** readable, and
+birth names are not what the user calls their machines.
+
+The primary fix is an ordinary T0 collection, `deviceNames`, keyed on
+`pub_sign`, carrying whatever the user renamed each device to. **Zero protocol
+change** — it is the sixteenth entry in a list of fifteen. No op, no verifier
+rule, no flag, no wire format, no test vectors to regenerate.
+
+It wins on every axis at once:
+
+- **The epoch problem vanishes for free.** §9.1 step 2 already re-seals every T0
+  collection on rotation. That is precisely what an immutable chain entry cannot
+  do and a mutable object does automatically.
+- **It fixes renames**, which nothing else on the list touches.
+- **Better metadata posture than a `relabel` op**, which would leak rename
+  timing and frequency as T1; a collection leaks only "an object changed", like
+  every other collection.
+- Half a day, last-writer-wins like everything else. A conflict copy of a
+  nickname list is a non-event.
+
+**Timing checks out.** At review time the recovering device holds `AK_n` from the
+escrow, hence `K_profile_n`. Epoch-`n` objects are deleted at §9.1 **step 6**,
+*after* the transition, and the review runs before it — so the collection is
+live and openable exactly when the screen needs it. A crashed prior rotation is
+already handled by §6.8.
+
+**Its one hole:** the collection is a server-held object, so a hostile server can
+**withhold** it, pushing the screen back to birth names and hex. It cannot
+*forge* names — they are sealed under a key it lacks — so the worst case is
+absent or stale, never misleading. That is an availability attack aimed at
+provoking the estate-wide wipe, and D5's quarantine is what closes it: if
+non-re-admission quarantines rather than destroys, withholding costs some
+re-pairing rather than runbooks.
+
+**The `K_label` split is therefore demoted to the fallback's fallback** — what
+makes the degraded path show birth names instead of hex when the server has
+withheld the overlay. Still ~20 lines and one escrow field, still worth doing,
+no longer the thing that makes recovery safe. The distribution rules below stand
+if and when it is built.
+
+### D2 (original, retained for its reasoning). Labels readable across rotations
 
 `K_label_n = HKDF(AK_n, "addy-label-v1\0" || account_id || u64(n))`, split off
 `K_profile_n`. `SealLabel` and `OpenLabel` keep their AAD byte for byte; only the
@@ -125,7 +170,10 @@ SSH session". What is missing is only the ability to tell the two causes apart.
 
 ## Two findings filed separately
 
-### F1. The roster label is a BIRTH NAME
+### F1. The roster label is a BIRTH NAME — and this is close to a reversal
+
+**Upgraded from "a lower ceiling" after the generator's own comment was read
+back.**
 
 Renames are local, entries are immutable, and no relabel op exists. A user who
 renamed `quiet-otter-41` to "work laptop" two years ago sees `quiet-otter-41` on
@@ -136,13 +184,28 @@ Worse, the population that renames is plausibly the population that needs the
 screen — a user with two devices never renames; a user with eight across two
 sites does, and is exactly the user for whom re-pairing is expensive.
 
-The candidate fix costs no protocol change: sync the local rename as ordinary T0
-collection data keyed on `pub_sign`, leaving the roster's birth name alone. The
-screen shows the current name when it has the collection and the birth name when
-it does not. The open question is timing — the review runs *before* anything is
-re-sealed.
+**The mechanism is in our own code.** `Pseudonym()` draws uniformly and does not
+attempt uniqueness, and `internal/identity/pseudonym.go` prescribes the remedy
+itself: *"Two devices that draw the same name are a cosmetic problem the user
+solves by renaming one."* So renaming is not merely more likely at scale — it is
+**the design's own documented fix for a problem that only appears at scale**.
+Collisions are negligible at two devices and routine at eight. The generator
+expects the eight-device user to rename, and that user's renames are exactly the
+ones the roster cannot carry.
 
-`DESIGN.md` should be tightened to say which name the roster carries.
+Stack the rest on top: re-pairing needs a code shown on one device and typed on
+another, so a headless box or a machine at another site is the *most* expensive
+false negative — and those are the machines most likely to have been renamed to
+something like "rack-1" precisely because their pseudonym means nothing
+physically.
+
+So the rating is not "a lower ceiling" but **the benefit is concentrated in the
+wrong place**: readable birth names help most where selection is easiest and
+least where it is hardest. Hence the revised D2 above.
+
+`DESIGN.md` should be tightened to say which name the roster carries, and
+`pseudonym.go`'s comment should stop prescribing a remedy the roster cannot
+carry without saying where the rename actually lives.
 
 ### F2. The trust-boundary guardrail has a hole
 

@@ -407,34 +407,88 @@ Zero protocol change. Zero churn in `roster_adversary_test.go`, `roster.go`,
 the difference between building it well and building it badly, and costs about a
 day.
 
-### 5.2 Per-epoch `K_label_n`, carried in escrow and handoff — do it
+### 5.2 A `deviceNames` T0 collection, additive — do this instead
 
-This is the crypto review's proposal and it is better than the epoch-independent
-key this document originally weighed (§5.3). Split `K_label_n` off `K_profile_n`,
-and carry `K_label_1..n` in the escrow blob and the epoch handoff. A recovering
-device opens escrow, gets every label key, and reads every label.
+**This supersedes §5.2's previous recommendation (`K_label_n` in escrow), and the
+reason it does is that the previous draft costed the collection idea wrong.** It
+was priced as a *replacement* for `label_ct` — removing it from the entry,
+rewriting §5.4, §5.7 step 10 and §9, losing the `pub_sign`-in-AAD binding, a week
+in the most dangerous file in the repo. As an **overlay** it is none of those
+things.
 
-Two properties that earn it:
+Add one ordinary T0 collection, `deviceNames`, mapping `pub_sign` → display name.
+Written when a device is added and updated when the user renames. The roster's
+`label_ct` stays exactly as it is and becomes a fallback for anything the
+collection does not cover.
 
-- **No confidentiality regression at all.** A revoked device holds label keys up
-  to epoch `n` and cannot obtain `K_label_{n+1}`, exactly as today. §5.3 could
-  not say this.
+Why it wins on every axis at once:
+
+- **Zero protocol change.** No new op, no verifier rule, no flag, no wire-format
+  change, no test-vector regeneration. It is the 16th entry in a list of 15, and
+  the machinery is built.
+- **The epoch problem disappears for free.** §9.1 step 2 already re-seals *every*
+  T0 collection on rotation. That is precisely what an immutable chain entry
+  cannot do and a mutable object does automatically.
+- **It is readable at review time.** The recovering device holds `AK_n` from
+  escrow, hence `K_profile_n`; epoch-`n` objects are deleted only at §9.1 step 6,
+  *after* the transition, and the review runs before it. So the collection is
+  live and openable exactly when the screen needs it. (A crashed prior rotation
+  is covered by §6.8, which forces the client to resolve to a consistent epoch
+  first.)
+- **It fixes the birth-name problem too** (§4.2.1), which no other option on this
+  list touches. The screen shows what the user calls the machine, not what it was
+  christened.
+- **Better metadata posture than a `relabel` op.** Chain entries leak rename
+  timing and frequency as T1; a collection leaks only "an object changed", like
+  every other collection.
+
+**The one hole, and why it is survivable.** The collection is a server-held
+object, so a hostile server can withhold it and force the screen back to birth
+names and hex — re-creating the failure the crypto option was solving, as an
+availability attack aimed at provoking an estate-wide wipe. It cannot *forge*
+names (the object is sealed under a key it does not hold), so the worst case is
+absent or stale, never misleading. And **§4.2.2's deferred wipe closes it**: if
+non-re-admission quarantines rather than destroys, withholding the collection
+costs the user some re-pairing, not their runbooks. This is also a threat class
+`DESIGN.md` already concedes — "they can serve you old data or destroy it… that
+is a recovery problem". It is a reason to insist on the deferral, not a reason to
+buy the escrow change.
+
+Cost: half a day. LWW like every other collection; a conflict copy of a nickname
+list is a non-event. **Implementation note:** `deviceNames` is not a `Persisted`
+key, so it lands squarely in the guardrail gap flagged in §4.2. Add it to
+`tests/addyTrustBoundary.test.ts`'s collection list explicitly rather than
+letting it be the first resident of that gap.
+
+### 5.2a Per-epoch `K_label_n` in escrow — optional, no longer load-bearing
+
+The crypto review's proposal, and a good one: split `K_label_n` off
+`K_profile_n` and carry `K_label_1..n` in the escrow blob and the handoff. Two
+things earn it and both stand:
+
+- **No confidentiality regression.** A revoked device holds label keys up to
+  epoch `n` and cannot obtain `K_label_{n+1}`, exactly as today. §5.3 could not
+  say this.
 - **It avoids a forward-secrecy trap this document did not spot.** Escrowing raw
   `AK` history would let a server that hoarded epoch-3 collection ciphertext and
   later obtained the mnemonic read the hoard — forward secrecy traded for
-  nicknames. Splitting the key confines the escrowed history to labels, and the
+  nicknames. Splitting the key confines the escrowed history to labels, and
   labels are *generated pseudonyms*, so the history it exposes has no semantic
   content. The narrowness of the key is what makes carrying its history safe.
 
-**Cost is more than the twenty lines §5.3 claimed, and less than option 5.5.**
-`keys.go` gains a `derive32` and a field; `SealLabel`/`OpenLabel` take `kLabel`.
-The real work is that the escrow plaintext (§6.1) stops being a fixed-width
+What changed is not its quality but its necessity. With §5.2 in place the labels
+are readable anyway, and §5.2 additionally fixes renames, which this does not.
+Its residual value is the withholding case above — it rides in the escrow blob,
+which the server must serve for recovery to happen at all and which is
+integrity-protected by the commitment and counter. That is real but narrow, and
+§4.2.2 already covers it.
+
+Cost if taken later: `keys.go` gains a `derive32` and a field; `SealLabel` /
+`OpenLabel` take `kLabel`; the escrow plaintext (§6.1) stops being a fixed-width
 `ak_seed` and gains a variable-length key list — a wire-format change to the
-object with the most normative language in the protocol — plus the same in
-`handoff.go`, plus regenerating the pinned test vectors. Call it a focused day
-and a half across `keys.go`, `genesis.go`, `escrow.go`, `handoff.go` and their
-vectors. Affordable, pre-users, and it buys a screen the user can actually act
-on. Escrow growth is 32 bytes per epoch — irrelevant.
+object carrying the most normative language in the protocol — plus `handoff.go`
+and regenerated test vectors. A focused day and a half. Defensible as
+belt-and-braces; not the thing to do first.
 
 ### 5.3 Epoch-independent label key — superseded, do not do
 
@@ -482,11 +536,11 @@ genesis, needs a conflict story for concurrent renames, and removes the
 `pub_sign`-in-AAD binding as a *chain* property. Roughly a week in the most
 security-critical code in the repo.
 
-§5.2 buys the same display outcome for a fraction of the cost, so it wins today.
-But §5.5 is the only option that also makes **renames propagate** — see §4.2.1,
-where the roster's birth-name problem survives every other fix on this list. If
-cross-device renames become a requirement, this is the answer; do not build it
-for labels alone.
+**Superseded by §5.2, which is this idea done additively.** Everything expensive
+here comes from treating the collection as a *replacement* for `label_ct`. Keep
+`label_ct` as a fallback and the protocol change vanishes, along with the week of
+work and the loss of the AAD binding. There is no remaining case for the
+replacement form.
 
 ---
 
@@ -498,11 +552,15 @@ for labels alone.
 | Five-word phrase per device? | No. No recognition value, cannot catch truncation, and dilutes the one phrase that matters. Use short hex — it should read as missing data. |
 | Names on the card? | No — it goes stale and trains people to dismiss mismatches. Add the **print date** instead, and render the head as words. |
 | Cheapest real fix? | Machine-check the card phrase (hard-fail on absence); re-admission defaulting to off; last-changed date in words; "have you removed a device?" |
-| Crypto change worth it? | **Yes — `K_label_n` split, carried in escrow and handoff (§5.2).** Not for readability's sake, but because default-off selection is unusable without it. |
+| Crypto change worth it? | **No — but labels must still be fixed.** A `deviceNames` T0 collection (§5.2) gets readable *and current* names with no protocol change. `K_label_n` (§5.2a) is good work that is no longer load-bearing. |
 
 Two sentences carry the whole document. **A review that displayed every device's
 name perfectly would still hand a truncated chain a confident yes** — so the
-presentation fix is the one that addresses the defect. And **a selection screen
-nobody can select on is not a safe default, it is a wipe** — so the label fix is
-what makes the presentation fix survive contact with a rotated account. Neither
-is sufficient alone, and together they are about two and a half days.
+presentation fix is what addresses the defect. And **a selection screen nobody
+can select on is not a safe default, it is a wipe** — so names must be readable
+for the presentation fix to survive contact with a rotated account. Neither is
+sufficient alone.
+
+Total: §4's restore screen (a day), the `deviceNames` collection (half a day),
+the deferred wipe and its flag bit (§4.2.2, half a day). Call it two days, and no
+change to the protocol.
