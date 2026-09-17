@@ -49,7 +49,13 @@ echo "addy $VERSION ($BUILD_SHA)"
 # Vet and test BEFORE building anything. A red test should fail the run rather
 # than produce an artifact nobody checked -- the same order the sibling repo's
 # sidecar build uses, for the same reason.
-( cd "$ROOT" && go vet ./... && go test ./... )
+# Vendored third-party code is excluded from vet and from the gofmt check in
+# CI: it stays byte-identical to upstream, which is what makes its recorded
+# hashes mean anything, and reformatting it would make every future diff
+# against upstream unreadable. Its TESTS still run -- the design says to review
+# it as our own code, and running what it ships is the first part of that.
+OWN_PKGS=$(cd "$ROOT" && go list ./... | grep -v '/vendor/')
+( cd "$ROOT" && go vet $OWN_PKGS && go test ./... )
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
