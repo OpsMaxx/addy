@@ -766,6 +766,27 @@ compute is not a binding, it is a bug.
 
 ### 8.3 The exchange
 
+> **Correction, 2026-09-17, found by implementing it.** The frame table below
+> puts A's `DK_sign.pub` on frame 3 and `conf_B` on frame 2, and §8.4 puts BOTH
+> signing keys in the confirmation label. Those cannot both hold: B computes
+> `conf_B` for frame 2, and at that point it has not been told A's key.
+>
+> Resolved by moving **A's `DK_sign.pub` to frame 1**, which is the smaller
+> change and costs nothing — it is a public key, the relay sees it either way,
+> and the roster carries device public keys as T1 metadata regardless. Frame 3
+> then carries only `conf_A`: that value already binds A's key, so a relay that
+> substituted it fails the confirmation rather than needing a second copy to be
+> compared against.
+>
+> The implementation in `internal/pair` follows the corrected shape.
+>
+> **Also corrected:** §8.4 says `K` is "the SPAKE2 shared secret as `gospake2`
+> returns it". `gospake2` is not used — see the SPAKE2 correction at the top of
+> `DESIGN.md` and `docs/spake2-review.md`. `K` is SHA-256 of RFC 9382's
+> length-prefixed transcript, which binds both identity strings, both messages,
+> the group element and the password scalar.
+
+
 SPAKE2 with asymmetric roles. `A` = the initiating device (the one showing the
 code), `B` = the joining device (the one typing it). Identity strings are the
 fixed ASCII `addy-pair-init` and `addy-pair-join`; they are constants, not

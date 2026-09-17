@@ -46,12 +46,12 @@ func TestTheEmojiTableIsIntactAndIndexedByPosition(t *testing.T) {
 // attack.
 func TestTheSameSecretAlwaysProducesTheSameSAS(t *testing.T) {
 	secret := bytes.Repeat([]byte{0xa5}, 32)
-	first, err := DeriveSAS(secret)
+	first, err := DeriveSAS(secret, testPairingID, testInitPub, testJoinPub)
 	if err != nil {
 		t.Fatalf("DeriveSAS: %v", err)
 	}
 	for i := 0; i < 20; i++ {
-		again, err := DeriveSAS(secret)
+		again, err := DeriveSAS(secret, testPairingID, testInitPub, testJoinPub)
 		if err != nil {
 			t.Fatalf("DeriveSAS: %v", err)
 		}
@@ -64,11 +64,11 @@ func TestTheSameSecretAlwaysProducesTheSameSAS(t *testing.T) {
 // A different transcript must produce a different SAS -- that is the entire
 // tripwire. If it did not, an injected fault would go unnoticed.
 func TestADifferentSecretProducesADifferentSAS(t *testing.T) {
-	a, err := DeriveSAS([]byte("one"))
+	a, err := DeriveSAS([]byte("one"), testPairingID, testInitPub, testJoinPub)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := DeriveSAS([]byte("two"))
+	b, err := DeriveSAS([]byte("two"), testPairingID, testInitPub, testJoinPub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +81,8 @@ func TestADifferentSecretProducesADifferentSAS(t *testing.T) {
 	base := bytes.Repeat([]byte{0x00}, 32)
 	flipped := append([]byte(nil), base...)
 	flipped[31] ^= 0x01
-	x, _ := DeriveSAS(base)
-	y, _ := DeriveSAS(flipped)
+	x, _ := DeriveSAS(base, testPairingID, testInitPub, testJoinPub)
+	y, _ := DeriveSAS(flipped, testPairingID, testInitPub, testJoinPub)
 	if x.Indices == y.Indices {
 		t.Error("flipping one bit of the secret left the SAS unchanged")
 	}
@@ -98,7 +98,7 @@ func TestEveryIndexIsInRangeAndTheSpaceIsUsed(t *testing.T) {
 		if _, err := rand.Read(secret); err != nil {
 			t.Fatal(err)
 		}
-		s, err := DeriveSAS(secret)
+		s, err := DeriveSAS(secret, testPairingID, testInitPub, testJoinPub)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestKnownSecretPinsTheBitExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := DeriveSAS(secret)
+	s, err := DeriveSAS(secret, testPairingID, testInitPub, testJoinPub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestKnownSecretPinsTheBitExtraction(t *testing.T) {
 	// agreeing is worth more than one implementation agreeing with itself.
 	var want [7]int
 	{
-		out, err := sasBytesForTest(secret)
+		out, err := sasBytesForTest(secret, testPairingID, testInitPub, testJoinPub)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,13 +156,13 @@ func TestKnownSecretPinsTheBitExtraction(t *testing.T) {
 }
 
 func TestAnEmptySecretIsRefused(t *testing.T) {
-	if _, err := DeriveSAS(nil); err == nil {
+	if _, err := DeriveSAS(nil, testPairingID, testInitPub, testJoinPub); err == nil {
 		t.Error("DeriveSAS accepted an empty secret")
 	}
 }
 
 func TestWordsAreAvailableForReadingAloud(t *testing.T) {
-	s, err := DeriveSAS([]byte("something"))
+	s, err := DeriveSAS([]byte("something"), testPairingID, testInitPub, testJoinPub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,5 +179,49 @@ func TestWordsAreAvailableForReadingAloud(t *testing.T) {
 	}
 	if len([]rune(strings.ReplaceAll(s.String(), " ", ""))) == 0 {
 		t.Error("String() produced nothing")
+	}
+}
+
+var (
+	testPairingID = bytes.Repeat([]byte{0x11}, 16)
+	testInitPub   = bytes.Repeat([]byte{0x22}, 32)
+	testJoinPub   = bytes.Repeat([]byte{0x33}, 32)
+)
+
+// The emoji bind the PAKE result to the two keys the devices are about to
+// trust. Without that, the PAKE proves a shared password and nothing about who
+// holds it, and the emoji confirm a fact nobody needed.
+func TestTheSASBindsBothIdentityKeys(t *testing.T) {
+	secret := bytes.Repeat([]byte{0x5a}, 32)
+
+	base, err := DeriveSAS(secret, testPairingID, testInitPub, testJoinPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := bytes.Repeat([]byte{0x44}, 32)
+
+	for name, got := range map[string]func() (SAS, error){
+		"a different pairing id": func() (SAS, error) { return DeriveSAS(secret, other[:16], testInitPub, testJoinPub) },
+		"a different initiator":  func() (SAS, error) { return DeriveSAS(secret, testPairingID, other, testJoinPub) },
+		"a different joiner":     func() (SAS, error) { return DeriveSAS(secret, testPairingID, testInitPub, other) },
+		"the two keys swapped":   func() (SAS, error) { return DeriveSAS(secret, testPairingID, testJoinPub, testInitPub) },
+	} {
+		s, err := got()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if s.Indices == base.Indices {
+			t.Errorf("%s produced the same emoji", name)
+		}
+	}
+
+	for name, args := range map[string][3][]byte{
+		"no pairing id": {nil, testInitPub, testJoinPub},
+		"no initiator":  {testPairingID, nil, testJoinPub},
+		"no joiner":     {testPairingID, testInitPub, nil},
+	} {
+		if _, err := DeriveSAS(secret, args[0], args[1], args[2]); err == nil {
+			t.Errorf("DeriveSAS accepted %s", name)
+		}
 	}
 }

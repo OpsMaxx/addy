@@ -37,7 +37,8 @@ func loadEmoji() []emojiEntry {
 	return doc.Emoji
 }
 
-// sasInfo is the HKDF info label.
+// sasInfo is the ASCII half of the HKDF info label; the full label also carries
+// the pairing id and both devices' signing keys. See DeriveSAS.
 //
 // OURS, NOT MATRIX'S. The ENCODING is copied from Matrix -- six bytes, the
 // first forty-two bits, seven groups of six -- because a homegrown SAS encoding
@@ -84,9 +85,16 @@ func (s SAS) Words() string { return strings.Join(s.Description[:], ", ") }
 // Seven emoji from a 64-entry table is 42 bits, which is the number that
 // matters: an attacker who has to produce a matching SAS is guessing one in
 // four trillion, and they get one guess because the PAKE burns the code.
-func DeriveSAS(sharedSecret []byte) (SAS, error) {
+func DeriveSAS(sharedSecret, pairingID, initiatorPubSign, joinerPubSign []byte) (SAS, error) {
 	if len(sharedSecret) == 0 {
 		return SAS{}, fmt.Errorf("pair: deriving a SAS from an empty secret")
+	}
+	if len(pairingID) == 0 || len(initiatorPubSign) == 0 || len(joinerPubSign) == 0 {
+		// The identity keys are in the label so the emoji bind the PAKE result
+		// to the two keys the devices are about to trust. Without that binding
+		// the PAKE proves a shared password and nothing about who holds it,
+		// and the emoji would be confirming a fact nobody needed.
+		return SAS{}, fmt.Errorf("pair: a SAS must bind the pairing id and both signing keys")
 	}
 	if len(emojiTable) != 64 {
 		return SAS{}, fmt.Errorf("pair: the emoji table has %d entries, not 64", len(emojiTable))
@@ -97,7 +105,8 @@ func DeriveSAS(sharedSecret []byte) (SAS, error) {
 	// a salt adds nothing; and a salt that the two sides derive differently is
 	// a mismatch a user reads as an attack.
 	var out [6]byte
-	if _, err := io.ReadFull(hkdf.New(sha256.New, sharedSecret, nil, []byte(sasInfo)), out[:]); err != nil {
+	if _, err := io.ReadFull(hkdf.New(sha256.New, sharedSecret, nil,
+		sasLabel(pairingID, initiatorPubSign, joinerPubSign)), out[:]); err != nil {
 		return SAS{}, fmt.Errorf("pair: deriving the SAS: %w", err)
 	}
 
@@ -126,11 +135,25 @@ func DeriveSAS(sharedSecret []byte) (SAS, error) {
 	return s, nil
 }
 
+// sasLabel is the ASCII label, a NUL, then the pairing id and both signing
+// keys. Order is fixed: initiator then joiner, so the two sides build the same
+// bytes without negotiating.
+func sasLabel(pairingID, initiatorPubSign, joinerPubSign []byte) []byte {
+	out := make([]byte, 0, len(sasInfo)+1+len(pairingID)+len(initiatorPubSign)+len(joinerPubSign))
+	out = append(out, sasInfo...)
+	out = append(out, 0x00)
+	out = append(out, pairingID...)
+	out = append(out, initiatorPubSign...)
+	out = append(out, joinerPubSign...)
+	return out
+}
+
 // sasBytesForTest exposes the six derived bytes so a test can recompute the bit
 // extraction independently. Two expressions of the same rule agreeing is worth
 // more than one expression agreeing with itself.
-func sasBytesForTest(sharedSecret []byte) ([6]byte, error) {
+func sasBytesForTest(sharedSecret, pairingID, initiatorPubSign, joinerPubSign []byte) ([6]byte, error) {
 	var out [6]byte
-	_, err := io.ReadFull(hkdf.New(sha256.New, sharedSecret, nil, []byte(sasInfo)), out[:])
+	_, err := io.ReadFull(hkdf.New(sha256.New, sharedSecret, nil,
+		sasLabel(pairingID, initiatorPubSign, joinerPubSign)), out[:])
 	return out, err
 }
