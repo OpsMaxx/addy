@@ -28,24 +28,12 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Formatting
-        run: |
-          # Vendored third-party code is excluded: it stays byte-identical to
-          # upstream, which is what makes its recorded hashes mean anything.
-          unformatted=$(gofmt -l $(git ls-files '*.go' | grep -v '/vendor/'))
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt would change these files:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: Vet
-        run: go vet $(go list ./... | grep -v '/vendor/')
-
-      # Tests run BEFORE any build, deliberately. A red test should fail the
-      # run rather than produce an artifact nobody checked.
-      - name: Test
-        run: go test ./...
+      # One script, so what CI runs and what a contributor can run locally
+      # cannot drift apart. It is also each step as its own statement, because
+      # `set -e` does not abort inside an `&&` chain -- which is how a commit
+      # lands with vet red.
+      - name: Check
+        run: ./scripts/check.sh
 
       # The reason this is here rather than "nice to have later": the HPKE
       # library carries GO-2026-4550 / CVE-2026-1229 below v1.6.3. A pin that
