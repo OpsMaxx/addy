@@ -277,3 +277,19 @@ func (d *Decoder) End() error {
 
 // Err returns the first error without asserting that the input was consumed.
 func (d *Decoder) Err() error { return d.err }
+
+// Offset is how many bytes have been consumed.
+//
+// Needed because a roster entry is `body || sig` with no length prefix: the
+// body is variable-length, so the only way to find where the signature starts
+// is to decode the body and ask. The split is unambiguous because the signature
+// is fixed-width and last.
+func (d *Decoder) Offset() int { return d.i }
+
+// Rest returns the unconsumed bytes without consuming them.
+func (d *Decoder) Rest() []byte {
+	if d.err != nil {
+		return nil
+	}
+	return d.b[d.i:]
+}
