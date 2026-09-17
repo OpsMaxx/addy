@@ -887,6 +887,29 @@ that does not limit is the real condition this defends against.
 
 ### 8.7 On confirm
 
+> **Correction, 2026-09-17, found by implementing it.** This section says the
+> handoff plaintext is "the `addy-escrow-v1\0` structure" with a different HPKE
+> info label. §10.1 says the joining device "receives `RK_sign.pub` in the same
+> sealed structure". The escrow structure has no field for it, so both cannot
+> hold.
+>
+> Resolved with a structure of its own, `addy-handoff-v1\0`, carrying the escrow
+> fields plus `rk_sign_pub` — rather than by adding an optional field to the
+> escrow. Two structures that differ by a field and share a domain prefix are two
+> structures a verifier can be confused between; two with different prefixes are
+> not, and there is a test that neither opens as the other.
+>
+> `RK_sign.pub` has to travel because a joining device verifies the chain from
+> genesis, and step 8 of that algorithm needs the root key to check root-signed
+> entries. It cannot take that key from the server: a chain verified against a
+> key the server supplied is not verified.
+>
+> `OpenHandoff` additionally refuses a handoff whose `rk_sign_pub` does not
+> derive the `account_id` it claims — otherwise a device could be handed a
+> valid-looking handoff for a different account and would go on to verify that
+> account's chain quite happily.
+
+
 A, and only after both confirmations and the human's SAS confirmation:
 
 1. HPKE-seals `AK_n` to B's `DK_enc` — plaintext `addy-escrow-v1\0` structure
