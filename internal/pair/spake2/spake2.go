@@ -12,10 +12,25 @@
 // SPAKE2 to rely on.
 //
 // So: RFC 9382's own constants, on filippo.io/edwards25519, which gives
-// constant-time scalar arithmetic, a SetBytes that validates canonical encoding
-// and curve membership and returns an error rather than panicking, and a
-// fixed-width 32-byte encoding in which the variable-length bug that review
-// found cannot be expressed.
+// constant-time scalar arithmetic, a SetBytes that validates curve membership
+// and returns an error rather than panicking, and a fixed-width 32-byte
+// encoding in which the variable-length bug that review found cannot be
+// expressed. (Canonicality it does NOT validate -- see Finish.)
+//
+// THE ATTACK THE TIMING LEAK ENABLED, stated because it is the reason
+// constant-time arithmetic is not a nicety here: the old library's ladder
+// branched per bit over math/big, on both the password scalar and the ephemeral
+// one, measured at a 1.99x runtime ratio by Hamming weight. Leaking the
+// ephemeral scalar x yields w·M = X* - x·B, and from there the pairing code
+// falls to an offline dictionary attack over a 22-bit space -- which is the one
+// thing a PAKE exists to prevent.
+//
+// ONE THING THE OLD LIBRARY GOT RIGHT AND THIS KEEPS. Its error paths were
+// clean: every early return happened before the password scalar was touched and
+// depended only on public or attacker-supplied state, so no refusal was an
+// oracle. Finish below preserves that ordering, and a test pins it by refusing
+// the same hostile frames under two different passwords and requiring identical
+// outcomes.
 package spake2
 
 import (

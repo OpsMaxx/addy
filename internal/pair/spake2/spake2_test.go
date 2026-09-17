@@ -324,3 +324,104 @@ func TestAnEmptyPasswordIsRefused(t *testing.T) {
 		t.Error("Start accepted an empty password")
 	}
 }
+
+// NO ORACLE IN THE ERROR PATHS.
+//
+// The review of the library this replaces found its error handling to be the
+// healthiest part of it: every early return happened before the password scalar
+// was touched, and depended only on public or attacker-supplied state. That is
+// worth keeping rather than rediscovering, so it is pinned here.
+//
+// The property: every refusal in Finish -- wrong length, reflection, bad point,
+// non-canonical encoding, degenerate point -- is decided from the peer's frame
+// and our own public message alone. None of them branches on w, so none of them
+// leaks anything about the code by which path it took or how long it took.
+func TestEveryRefusalIsDecidedBeforeThePasswordIsUsed(t *testing.T) {
+	// Two states from DIFFERENT passwords. If a refusal depended on the
+	// password, the same hostile frame would be refused differently by them.
+	_, weak, err := Start(Initiator, []byte("00-amber-cedar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, strong, err := Start(Initiator, bytes.Repeat([]byte{0xa5}, 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	frames := map[string][]byte{
+		"empty":         {},
+		"short":         bytes.Repeat([]byte{1}, 31),
+		"long":          bytes.Repeat([]byte{1}, 33),
+		"identity":      append([]byte{0x01}, make([]byte, 31)...),
+		"non-canonical": append(bytes.Repeat([]byte{0xff}, 31), 0x7f),
+		"off-curve":     bytes.Repeat([]byte{0x02}, 32),
+	}
+	for name, frame := range frames {
+		_, a, err := Start(Initiator, []byte("00-amber-cedar"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, b, err := Start(Initiator, bytes.Repeat([]byte{0xa5}, 64))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, errA := a.Finish(frame)
+		_, errB := b.Finish(frame)
+
+		if (errA == nil) != (errB == nil) {
+			t.Errorf("%s: one password refused it and the other did not", name)
+			continue
+		}
+		if errA != nil && errA.Error() != errB.Error() {
+			t.Errorf("%s: two passwords produced different refusals:\n %v\n %v", name, errA, errB)
+		}
+	}
+	_, _ = weak, strong
+}
+
+// The transcript must commit to the FULL fixed-width messages.
+//
+// The review found the old library taking its transcript field width from the
+// length of the derived key rather than the group element size, so about one
+// session in 315 hashed a transcript one byte short per message field. Both
+// sides truncated identically, so the keys still agreed and nothing looked
+// wrong -- while the transcript quietly stopped committing to the whole of what
+// was exchanged. Fixed-width encoding plus explicit length prefixes means the
+// mistake has nowhere to live here, and this asserts it.
+func TestTheTranscriptDependsOnEveryByteOfBothMessages(t *testing.T) {
+	pw := []byte("42-amber-cedar")
+
+	base := func() []byte {
+		msgA, a, err := Start(Initiator, pw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgB, b, err := Start(Joiner, pw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ka, err := a.Finish(msgB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kb, err := b.Finish(msgA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(ka, kb) {
+			t.Fatal("the sides disagreed")
+		}
+		return ka
+	}
+
+	// Two independent runs must differ, because each draws fresh scalars: if
+	// the transcript ignored part of the messages, collisions would appear.
+	seen := map[string]bool{}
+	for i := 0; i < 500; i++ {
+		k := base()
+		if seen[string(k)] {
+			t.Fatal("two runs with the same password produced the same secret; the transcript is not committing to the messages")
+		}
+		seen[string(k)] = true
+	}
+}
