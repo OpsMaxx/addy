@@ -539,3 +539,101 @@ func mustEntryHash(t *testing.T, e Entry) []byte {
 	}
 	return h
 }
+
+// The shape a RECOVERY produces, pinned deliberately rather than by omission.
+//
+// §5.8 forces a hard re-key on recovery, and the review of the review-screen
+// design settled what that tail looks like: revoke every device the user did
+// not re-confirm, transition to the next epoch, then add the recovering device.
+// In the worst case -- the user confirms nothing -- the chain passes through a
+// ZERO-DEVICE SET between the last revoke and the self-add.
+//
+// That is legal: there is no minimum-device-count invariant, only a refusal of
+// a chain with no entries at all. It was legal by ACCIDENT though, which is the
+// kind of property that gets broken by a well-meaning "a roster must always
+// have at least one device" check. So it is asserted.
+func TestARecoveryChainMayPassThroughZeroDevices(t *testing.T) {
+	b := newBuilder(t)
+	b.addDevice(1)
+	b.addDevice(2)
+
+	// The user confirms nothing, so both existing devices are revoked in the
+	// epoch they were actually in.
+	b.revokeDevice(1)
+	b.revokeDevice(2)
+
+	// Between here and the self-add, the device set is empty.
+	mid, err := b.verify(b.raw(), nil)
+	if err != nil {
+		t.Fatalf("a chain with every device revoked was refused: %v", err)
+	}
+	if len(mid.Devices) != 0 {
+		t.Fatalf("device set has %d entries, want 0", len(mid.Devices))
+	}
+
+	// A revocation rotation, root-signed, because a recovery is by definition
+	// a moment when the user no longer knows which devices are theirs.
+	b.rotate(true)
+
+	// And the recovering device adds itself under the NEW epoch.
+	pubSign, pubEnc := device(9)
+	b.append(Entry{
+		Epoch: b.epoch, Op: OpAdd, Signer: SignerAK,
+		PubSign: pubSign, PubEnc: pubEnc,
+		LabelCT: bytes.Repeat([]byte{9}, 40), TS: 1,
+	})
+
+	v, err := b.verify(b.raw(), nil)
+	if err != nil {
+		t.Fatalf("the recovery chain was refused: %v", err)
+	}
+	if len(v.Devices) != 1 {
+		t.Fatalf("after recovery the device set has %d entries, want 1", len(v.Devices))
+	}
+	if !bytes.Equal(v.Devices[0].PubSign, pubSign) {
+		t.Error("the surviving device is not the recovering one")
+	}
+	if v.Epoch != 2 {
+		t.Errorf("chain ends in epoch %d, want 2", v.Epoch)
+	}
+}
+
+// And the partial case, which is the normal one: some devices re-confirmed,
+// some not. Confirmed devices are NEVER REVOKED -- they survive the rotation
+// and pick up the new epoch key when they next wake -- so a sleeping laptop the
+// user recognised is not punished for being asleep.
+func TestARecoveryKeepsTheDevicesTheUserConfirmed(t *testing.T) {
+	b := newBuilder(t)
+	b.addDevice(1)
+	b.addDevice(2)
+	b.addDevice(3)
+
+	// Device 2 is the one the user did not recognise.
+	b.revokeDevice(2)
+	b.rotate(true)
+
+	pubSign, pubEnc := device(9)
+	b.append(Entry{
+		Epoch: b.epoch, Op: OpAdd, Signer: SignerAK,
+		PubSign: pubSign, PubEnc: pubEnc,
+		LabelCT: bytes.Repeat([]byte{9}, 40), TS: 1,
+	})
+
+	v, err := b.verify(b.raw(), nil)
+	if err != nil {
+		t.Fatalf("the recovery chain was refused: %v", err)
+	}
+	if len(v.Devices) != 3 {
+		t.Fatalf("device set has %d entries, want 3 (two kept, one added)", len(v.Devices))
+	}
+	revoked, _ := device(2)
+	if indexOfDevice(v.Devices, revoked) >= 0 {
+		t.Error("the unconfirmed device survived the recovery")
+	}
+	for _, n := range []byte{1, 3} {
+		kept, _ := device(n)
+		if indexOfDevice(v.Devices, kept) < 0 {
+			t.Errorf("device %d was confirmed but did not survive", n)
+		}
+	}
+}
