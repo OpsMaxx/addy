@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/opsmaxx/addy/internal/api"
 	"github.com/opsmaxx/addy/internal/frontdoor"
 	"github.com/opsmaxx/addy/internal/portal"
 	"github.com/opsmaxx/addy/internal/store"
@@ -138,17 +139,28 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 
-	// Headless by default. The portal is a web surface on a box whose whole
-	// pitch is that it holds nothing worth attacking, so an operator who does
-	// not want one should not be running one.
-	var terminated http.Handler = http.NotFoundHandler()
+	// The API is always served. The PORTAL is headless by default -- it is a
+	// web surface on a box whose whole pitch is that it holds nothing worth
+	// attacking, so an operator who does not want one should not be running
+	// one. Turning the portal off does not turn addy off.
+	mux := http.NewServeMux()
+	mux.Handle("/v1/", api.New(db, log).Handler())
+
+	var pages http.Handler = http.NotFoundHandler()
 	if cfg.UI {
-		pages, err := portal.Handler(portal.Config{Version: cfg.Version, BuildSha: cfg.BuildSha})
+		p, err := portal.Handler(portal.Config{Version: cfg.Version, BuildSha: cfg.BuildSha})
 		if err != nil {
 			return fmt.Errorf("building the portal: %w", err)
 		}
-		terminated = portal.NoServiceWorker(pages)
+		pages = portal.NoServiceWorker(p)
 	}
+	// Longest pattern wins, so this beats "/v1/" for exactly this path. /v1/meta
+	// is the portal's, because it is what an unauthenticated page reads to show
+	// its own build, and it is tested to expose nothing else.
+	mux.Handle("/v1/meta", pages)
+	mux.Handle("/", pages)
+
+	var terminated http.Handler = mux
 
 	door := &frontdoor.Door{
 		Routes:           routes,

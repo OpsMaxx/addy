@@ -1,0 +1,296 @@
+package api
+
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/opsmaxx/addy/internal/protocol"
+)
+
+// Device authentication.
+//
+// A device proves it holds a DK_sign whose public half is an un-revoked entry in
+// the account's own roster. The server does not verify the roster's signatures
+// -- it holds no key for that -- but it does not need to: the chain it serves is
+// the chain the client verified, and a device the client would refuse is a
+// device whose requests the client's own data is not sealed to.
+
+const (
+	challengeTTL  = 2 * time.Minute
+	sessionTTL    = 12 * time.Hour
+	maxBody       = 8 << 20
+	authHeader    = "Authorization"
+	sigHeader     = "X-Addy-Signature"
+	nonceHeader   = "X-Addy-Nonce"
+	accountHeader = "X-Addy-Account"
+	deviceHeader  = "X-Addy-Device"
+)
+
+type authState struct {
+	mu         sync.Mutex
+	challenges map[string]challengeRecord
+	sessions   map[string]sessionRecord
+}
+
+type challengeRecord struct {
+	account string
+	device  string
+	expires time.Time
+}
+
+type sessionRecord struct {
+	account string
+	device  []byte
+	expires time.Time
+}
+
+func newAuthState() *authState {
+	return &authState{
+		challenges: map[string]challengeRecord{},
+		sessions:   map[string]sessionRecord{},
+	}
+}
+
+// sweep drops expired entries. Called on every use rather than on a timer,
+// because a timer is one more goroutine to shut down and the maps are small.
+func (a *authState) sweep(now time.Time) {
+	for k, v := range a.challenges {
+		if now.After(v.expires) {
+			delete(a.challenges, k)
+		}
+	}
+	for k, v := range a.sessions {
+		if now.After(v.expires) {
+			delete(a.sessions, k)
+		}
+	}
+}
+
+type challengeRequest struct {
+	Account string `json:"account"`
+	Device  string `json:"device"` // hex DK_sign public half
+}
+
+type challengeResponse struct {
+	Nonce string `json:"nonce"` // hex
+}
+
+func (s *Server) challenge(w http.ResponseWriter, r *http.Request) {
+	var req challengeRequest
+	if err := readJSON(r, &req); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+
+	nonce := make([]byte, protocol.NonceLen)
+	if _, err := rand.Read(nonce); err != nil {
+		s.fail(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	now := time.Now()
+	s.auth.mu.Lock()
+	s.auth.sweep(now)
+	s.auth.challenges[hex.EncodeToString(nonce)] = challengeRecord{
+		account: req.Account, device: req.Device, expires: now.Add(challengeTTL),
+	}
+	s.auth.mu.Unlock()
+
+	s.ok(w, challengeResponse{Nonce: hex.EncodeToString(nonce)})
+}
+
+type loginRequest struct {
+	Account     string `json:"account"`
+	Device      string `json:"device"`
+	DeviceNonce string `json:"device_nonce"`
+	ServerNonce string `json:"server_nonce"`
+	ServerSPKI  string `json:"server_spki"`
+	TS          uint64 `json:"ts"`
+	Signature   string `json:"signature"`
+}
+
+type loginResponse struct {
+	Token   string `json:"token"`
+	Expires int64  `json:"expires"`
+}
+
+// login verifies a signature over the login structure.
+//
+// THE SERVER NONCE IS SPENT ON USE, whether the login succeeds or fails. A nonce
+// that survives a failed attempt is a nonce an attacker can grind against.
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := readJSON(r, &req); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+
+	now := time.Now()
+	s.auth.mu.Lock()
+	s.auth.sweep(now)
+	rec, ok := s.auth.challenges[req.ServerNonce]
+	delete(s.auth.challenges, req.ServerNonce)
+	s.auth.mu.Unlock()
+
+	if !ok {
+		s.fail(w, http.StatusUnauthorized, errors.New("unknown or spent challenge"))
+		return
+	}
+	if rec.account != req.Account || rec.device != req.Device {
+		s.fail(w, http.StatusUnauthorized, errors.New("that challenge was issued to another device"))
+		return
+	}
+
+	devicePub, err := hex.DecodeString(req.Device)
+	if err != nil || len(devicePub) != ed25519.PublicKeySize {
+		s.fail(w, http.StatusBadRequest, errors.New("a device key is 32 bytes of hex"))
+		return
+	}
+
+	var acct protocol.AccountID
+	raw, err := hex.DecodeString(req.Account)
+	if err != nil || len(raw) != protocol.AccountIDLen {
+		s.fail(w, http.StatusBadRequest, errors.New("an account id is 16 bytes of hex"))
+		return
+	}
+	copy(acct[:], raw)
+
+	login := protocol.Login{
+		AccountID:   acct,
+		DeviceNonce: mustDecode(req.DeviceNonce),
+		ServerNonce: mustDecode(req.ServerNonce),
+		ServerSPKI:  mustDecode(req.ServerSPKI),
+		TS:          req.TS,
+	}
+	sig := mustDecode(req.Signature)
+	if err := protocol.Verify(ed25519.PublicKey(devicePub), login, sig); err != nil {
+		// 401 and nothing more specific. Distinguishing "no such account" from
+		// "wrong signature" would make this an oracle for which account ids
+		// exist.
+		s.fail(w, http.StatusUnauthorized, errors.New("that signature does not verify"))
+		return
+	}
+
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		s.fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(token)
+
+	s.auth.mu.Lock()
+	s.auth.sessions[sessionKey(encoded)] = sessionRecord{
+		account: req.Account, device: devicePub, expires: now.Add(sessionTTL),
+	}
+	s.auth.mu.Unlock()
+
+	s.ok(w, loginResponse{Token: encoded, Expires: now.Add(sessionTTL).Unix()})
+}
+
+// sessionKey hashes the bearer token before it is used as a map key, so a heap
+// dump does not hand out live sessions.
+func sessionKey(token string) string {
+	sum := sha256.Sum256([]byte("addy-session-v1\x00" + token))
+	return string(sum[:])
+}
+
+type authedRequest struct {
+	Account string
+	Device  []byte
+	Body    []byte
+}
+
+type authedHandler func(http.ResponseWriter, *http.Request, authedRequest)
+
+// authed checks the bearer token AND a per-request authorization signature.
+//
+// The token alone is not enough, deliberately. A bearer token is replayable by
+// anything that captures it; the signature binds the request to its method,
+// path and body, so an authorization for a GET cannot be replayed as a DELETE.
+func (s *Server) authed(next authedHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := bearer(r)
+		if !ok {
+			s.fail(w, http.StatusUnauthorized, errors.New("no bearer token"))
+			return
+		}
+
+		now := time.Now()
+		s.auth.mu.Lock()
+		s.auth.sweep(now)
+		sess, live := s.auth.sessions[sessionKey(token)]
+		s.auth.mu.Unlock()
+		if !live {
+			s.fail(w, http.StatusUnauthorized, errors.New("unknown or expired session"))
+			return
+		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+		if err != nil {
+			s.fail(w, http.StatusBadRequest, err)
+			return
+		}
+
+		var acct protocol.AccountID
+		raw, err := hex.DecodeString(sess.account)
+		if err != nil || len(raw) != protocol.AccountIDLen {
+			s.fail(w, http.StatusUnauthorized, errors.New("malformed session"))
+			return
+		}
+		copy(acct[:], raw)
+
+		authz := protocol.Authz{
+			AccountID:   acct,
+			DeviceNonce: mustDecode(r.Header.Get(nonceHeader)),
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			BodyHash:    protocol.HashBody(body),
+			TS:          0,
+		}
+		if err := protocol.Verify(ed25519.PublicKey(sess.device), authz, mustDecode(r.Header.Get(sigHeader))); err != nil {
+			s.fail(w, http.StatusUnauthorized, fmt.Errorf("request authorization: %w", err))
+			return
+		}
+
+		next(w, r, authedRequest{Account: sess.account, Device: sess.device, Body: body})
+	})
+}
+
+func bearer(r *http.Request) (string, bool) {
+	const prefix = "Bearer "
+	v := r.Header.Get(authHeader)
+	if len(v) <= len(prefix) || v[:len(prefix)] != prefix {
+		return "", false
+	}
+	return v[len(prefix):], true
+}
+
+func readJSON(r *http.Request, v any) error {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, v)
+}
+
+// mustDecode returns nil for anything that is not hex, and the callers treat a
+// nil field as a failed verification rather than as an absent one. A signature
+// over a field the server silently replaced with zeroes would verify against
+// nothing useful.
+func mustDecode(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return nil
+	}
+	return b
+}

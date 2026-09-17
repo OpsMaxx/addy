@@ -1,0 +1,101 @@
+// Package api is addy's HTTP surface: accounts, rosters, objects and the
+// signalling relay.
+//
+// WHAT THE SERVER CAN AND CANNOT DO, which is the whole shape of this package:
+// it stores signed entries it cannot forge and opaque bytes it cannot read, and
+// it relays frames it learns nothing from. It authenticates devices, because it
+// has to know whose quota to charge and whose objects to serve, and it does that
+// against public keys the roster already contains.
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+
+	"github.com/opsmaxx/addy/internal/store"
+)
+
+// Server is the API.
+type Server struct {
+	DB  *store.DB
+	Log *slog.Logger
+
+	auth *authState
+	hub  *hub
+}
+
+// New builds the API's handler.
+func New(db *store.DB, log *slog.Logger) *Server {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Server{DB: db, Log: log, auth: newAuthState(), hub: newHub()}
+}
+
+// Handler returns the routes.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+
+	// Unauthenticated: minting an account is how a client comes to have a key
+	// to authenticate WITH, so it cannot itself require one. What it requires
+	// instead is an invite, which is the only thing an admin actually controls.
+	mux.HandleFunc("POST /v1/account", s.createAccount)
+	mux.HandleFunc("POST /v1/auth/challenge", s.challenge)
+	mux.HandleFunc("POST /v1/auth/login", s.login)
+
+	// Authenticated. Every one of these carries a request-authorization
+	// signature over its method, path and body, so an authorization for a GET
+	// cannot be replayed as the DELETE the server would rather have had.
+	mux.Handle("GET /v1/roster", s.authed(s.getRoster))
+	mux.Handle("POST /v1/roster", s.authed(s.appendRoster))
+	mux.Handle("GET /v1/obj/{name}", s.authed(s.getObject))
+	mux.Handle("PUT /v1/obj/{name}", s.authed(s.putObject))
+	mux.Handle("GET /v1/signal", s.authed(s.signal))
+
+	return mux
+}
+
+type errorBody struct {
+	Error string `json:"error"`
+}
+
+// fail writes an error the client can act on without telling an anonymous
+// caller anything about the account.
+//
+// The message is the developer's; the STATUS is the contract. In particular a
+// missing account and a wrong signature both answer 401, because distinguishing
+// them would turn this endpoint into an oracle for which account ids exist.
+func (s *Server) fail(w http.ResponseWriter, status int, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(errorBody{Error: err.Error()})
+}
+
+func (s *Server) ok(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// statusFor maps a store error to a status. Conflicts are 409 so a client can
+// tell "somebody else wrote first" from "you sent nonsense".
+func statusFor(err error) int {
+	switch {
+	case errors.Is(err, store.ErrETagMismatch), errors.Is(err, store.ErrObjectExists),
+		errors.Is(err, store.ErrSeqTaken), errors.Is(err, store.ErrSeqGap),
+		errors.Is(err, store.ErrAccountExists):
+		return http.StatusConflict
+	case errors.Is(err, store.ErrNoAccount):
+		return http.StatusNotFound
+	case errors.Is(err, store.ErrInviteUnknown), errors.Is(err, store.ErrInviteSpent),
+		errors.Is(err, store.ErrInviteExpired):
+		return http.StatusForbidden
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func unmarshal(body []byte, v any) error { return json.Unmarshal(body, v) }
