@@ -37,6 +37,7 @@ Commands:
   serve       Run the relay
   preflight   Check this box can actually obtain a certificate, before installing
   selftest    Prove a running instance actually works end to end
+  join        Print the addy:// string a device uses to add this instance
   version     Print version information
 
 Run "addy <command> -h" for the flags a command takes.
@@ -57,6 +58,8 @@ func main() {
 		err = selftest(args)
 	case "preflight":
 		err = preflight(args)
+	case "join":
+		err = join(args)
 	case "version", "--version", "-version":
 		printVersion()
 		return
@@ -149,6 +152,24 @@ func preflight(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return server.Preflight(ctx, *domain)
+}
+
+func join(args []string) error {
+	fs := flag.NewFlagSet("join", flag.ExitOnError)
+	target := fs.String("target", "", "The instance to print a join string for")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	envDefault(target, "ADDY_DOMAIN", "")
+	if *target == "" {
+		return errors.New("join needs -target, or ADDY_DOMAIN in the environment")
+	}
+	s, err := server.JoinString(context.Background(), *target)
+	if err != nil {
+		return err
+	}
+	fmt.Println(s)
+	return nil
 }
 
 // envDefault fills target from the environment if a flag left it empty, and

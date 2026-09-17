@@ -72,3 +72,13 @@ func selfSigned(names []string, ips []net.IP) (tls.Certificate, []byte, []byte, 
 	}
 	return pair, certPEM, keyPEM, nil
 }
+
+// SelfSignedForTest exposes the development certificate generator to other
+// packages' tests.
+//
+// Exported rather than duplicated: a second implementation of "make a
+// certificate" in a test is a second thing that can drift from the one that
+// ships, and the point of a test is to exercise what ships.
+func SelfSignedForTest(names []string) (tls.Certificate, []byte, []byte, error) {
+	return selfSigned(names, nil)
+}
