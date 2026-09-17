@@ -121,7 +121,11 @@ func PrepareRotation(kind RotationKind, acct AccountID, current *Verified, prev 
 // For a REVOCATION rotation this is the only way AK_{n+1} reaches anybody:
 // there is no chained handoff object, because chaining would carry the revoked
 // device along with everyone else.
-func (r *Rotation) SealTo(d Device, acct AccountID, counter uint64, rootSignPub, headEntry []byte) error {
+// previousAK is the binding: the recipient is already a roster member holding
+// the previous epoch key, and an attacker who can read the roster's public
+// DK_enc is not. Without it, anybody could seal a "rotation" to any device in
+// any account they can see.
+func (r *Rotation) SealTo(d Device, acct AccountID, counter uint64, rootSignPub, headEntry, previousAK []byte) error {
 	enc, err := x25519Public(d.PubEnc)
 	if err != nil {
 		return fmt.Errorf("rotate: device encryption key: %w", err)
@@ -133,7 +137,7 @@ func (r *Rotation) SealTo(d Device, acct AccountID, counter uint64, rootSignPub,
 		AKSeed:      r.NewKeys.AK,
 		RootSignPub: rootSignPub,
 		HeadEntry:   headEntry,
-	}, enc)
+	}, enc, previousAK)
 	if err != nil {
 		return err
 	}
@@ -159,7 +163,7 @@ func (r *Rotation) ChainedHandoff(acct AccountID, counter uint64, previous *Epoc
 		AKSeed:      r.NewKeys.AK,
 		RootSignPub: rootSignPub,
 		HeadEntry:   headEntry,
-	}, previous.Enc.PublicKey())
+	}, previous.Enc.PublicKey(), previous.AK)
 }
 
 // ReadChainedHandoff opens a chained handoff, refusing one for a revocation
@@ -175,7 +179,7 @@ func ReadChainedHandoff(object []byte, transition Entry, acct AccountID, counter
 	if transition.Flags&FlagRevocationRotation != 0 {
 		return nil, errors.New("rotate: refusing a chained handoff for a revocation rotation")
 	}
-	return OpenHandoff(object, acct, transition.Epoch, counter, previous.Enc)
+	return OpenHandoff(object, acct, transition.Epoch, counter, previous.Enc, previous.AK)
 }
 
 func fingerprintKey(pubSign []byte) string {

@@ -259,6 +259,20 @@ func VerifyChain(raw []byte, acct AccountID, rootSignPub ed25519.PublicKey, epoc
 		return nil, fmt.Errorf("%w: seq=%d op=%d epoch=%d", ErrBadGenesis, g.Seq, g.Op, g.Epoch)
 	}
 
+	// The pinned keys are checked too. A client handed a degenerate root or
+	// epoch-1 key would verify a chain anybody could have written, and those
+	// keys arrive from a handoff or an escrow rather than from thin air.
+	if rootSignPub != nil {
+		if err := CheckSigningKey(rootSignPub); err != nil {
+			return nil, fmt.Errorf("roster: the pinned root key: %w", err)
+		}
+	}
+	if epoch1Sign != nil {
+		if err := CheckSigningKey(epoch1Sign); err != nil {
+			return nil, fmt.Errorf("roster: the pinned epoch 1 key: %w", err)
+		}
+	}
+
 	// Step 3: account binding. Checked against the account id derived from the
 	// root key this client holds, so a chain that is internally consistent but
 	// belongs to somebody else is refused.
@@ -343,7 +357,21 @@ func VerifyChain(raw []byte, acct AccountID, rootSignPub ed25519.PublicKey, epoc
 			}
 		}
 
-		// Step 9: signature.
+		// Step 9: signature -- and FIRST, that the keys in the entry are keys
+		// somebody could hold.
+		//
+		// An entry whose pub_sign is the identity point verifies any signature
+		// at all. Without this check, an authorised device could publish a
+		// rotation whose AK_{n+1}.sign is degenerate and hand the SERVER the
+		// ability to author roster entries with no account key -- which is the
+		// one thing this whole chain exists to prevent.
+		if err := CheckSigningKey(e.PubSign); err != nil {
+			return nil, fmt.Errorf("roster: entry %d pub_sign: %w", i, err)
+		}
+		if err := CheckAgreementKey(e.PubEnc); err != nil {
+			return nil, fmt.Errorf("roster: entry %d pub_enc: %w", i, err)
+		}
+
 		body, err := e.Encode()
 		if err != nil {
 			return nil, fmt.Errorf("roster: entry %d: %w", i, err)

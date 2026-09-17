@@ -383,3 +383,34 @@ func (c *Client) NextPairFrame(role string, pairingID []byte) ([]byte, error) {
 	}
 	return base64.StdEncoding.DecodeString(out.Frame)
 }
+
+// CapturedRequestForTest builds an authorised request without sending it, so a
+// test can replay the exact bytes that went out.
+//
+// Exported for tests rather than reconstructed in them: a test that builds its
+// own approximation of an authorised request is testing its approximation.
+func (c *Client) CapturedRequestForTest(method, path string) (*http.Request, error) {
+	nonce, err := protocol.Nonce()
+	if err != nil {
+		return nil, err
+	}
+	authz := protocol.Authz{
+		AccountID:   c.Account,
+		DeviceNonce: nonce,
+		Method:      method,
+		Path:        pathOnly(path),
+		BodyHash:    protocol.HashBody(nil),
+	}
+	sig, err := protocol.Sign(c.Device.Sign, authz)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(method, c.BaseURL+path, bytes.NewReader(nil))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Addy-Nonce", hex.EncodeToString(nonce))
+	req.Header.Set("X-Addy-Signature", hex.EncodeToString(sig))
+	return req, nil
+}

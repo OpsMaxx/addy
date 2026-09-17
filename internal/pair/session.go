@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -184,12 +185,15 @@ func Join(code string, f StartFrame, pubSign, pubEnc []byte) (*Joiner, ReplyFram
 // trust -- without that, the PAKE proves a shared password and nothing about
 // who holds it.
 func confirmations(secret, pairingID, initPubSign, joinPubSign []byte) (confA, confB []byte, err error) {
-	label := make([]byte, 0, len(confirmLabel)+1+len(pairingID)+64)
-	label = append(label, confirmLabel...)
-	label = append(label, 0x00)
-	label = append(label, pairingID...)
-	label = append(label, initPubSign...)
-	label = append(label, joinPubSign...)
+	// LENGTH-PREFIXED, not concatenated. An unprefixed concatenation means two
+	// different key pairs can produce the same label -- shift a byte from the
+	// end of one key to the start of the next and the bytes are identical.
+	//
+	// It is not exploitable here today: SPAKE2 already stops a relay choosing
+	// the secret, and the roster's fixed[32] fields stop a key of another
+	// width reaching this. But "two inputs, one label" is the shape of a real
+	// bug, and prefixes cost four bytes each.
+	label := lengthPrefixed(confirmLabel, pairingID, initPubSign, joinPubSign)
 
 	// No salt: the shared secret is already high-entropy and unique to this
 	// exchange, and a salt the two sides derive differently is a mismatch a
@@ -294,3 +298,18 @@ func (i *Initiator) Secret() []byte { return i.secret }
 
 // Secret is the pairing's shared secret.
 func (j *Joiner) Secret() []byte { return j.secret }
+
+// lengthPrefixed builds an HKDF label whose parts cannot be shifted into one
+// another: the ASCII tag, a NUL, then each field preceded by its own length.
+func lengthPrefixed(tag string, parts ...[]byte) []byte {
+	out := make([]byte, 0, len(tag)+1+len(parts)*36)
+	out = append(out, tag...)
+	out = append(out, 0x00)
+	for _, p := range parts {
+		var n [4]byte
+		binary.BigEndian.PutUint32(n[:], uint32(len(p)))
+		out = append(out, n[:]...)
+		out = append(out, p...)
+	}
+	return out
+}

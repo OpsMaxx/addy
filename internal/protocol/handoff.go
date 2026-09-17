@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/subtle"
@@ -23,6 +24,28 @@ import (
 // adding an optional field to the escrow. Two structures that differ by a field
 // and share a domain prefix are two structures a verifier can be confused
 // between; two structures with different prefixes are not.
+//
+// AND WHY A HANDOFF IS BOUND TO WHAT PRODUCED IT.
+//
+// Sealing one needs only the recipient's PUBLIC DK_enc, and frame 2 of a
+// pairing publishes exactly that, in the clear, on a relay the design assumes is
+// hostile. So without a binding, a relay can drop frame 3, seal its own handoff
+// for an account it controls, and the joining device adopts it cleanly -- it has
+// no way to tell, because the account id is something it LEARNS from the
+// handoff. The M1 review proved that end to end.
+//
+// So every handoff carries a BINDING: bytes both parties already share and an
+// outsider does not.
+//
+//   - A PAIRING handoff binds the PAKE shared secret. An attacker who did not
+//     run the exchange does not have it, and one who did is the device the human
+//     confirmed emoji with.
+//   - A ROTATION handoff binds the PREVIOUS epoch key. The recipient is already
+//     a roster member holding AK_n, and an attacker is not.
+//
+// It goes in the HPKE info, so it is bound into the key schedule rather than
+// checked afterwards: a handoff sealed without the right binding does not open
+// at all.
 //
 // WHY RK_sign.pub HAS TO TRAVEL. A joining device must verify the roster chain
 // from genesis, and step 8 of that algorithm needs the root key to check
@@ -85,7 +108,10 @@ func (h Handoff) aad() []byte {
 // NOTHING IS SEALED BEFORE THE HUMAN CONFIRMS THE EMOJI. That ordering is the
 // whole value of the confirmation step, and it is the caller's to enforce --
 // this function is what must not be called early.
-func SealHandoff(h Handoff, recipient *ecdh.PublicKey) ([]byte, error) {
+func SealHandoff(h Handoff, recipient *ecdh.PublicKey, binding []byte) ([]byte, error) {
+	if len(binding) == 0 {
+		return nil, errors.New("protocol: a handoff must be bound to the exchange that produced it")
+	}
 	plaintext, err := h.encodePlaintext()
 	if err != nil {
 		return nil, err
@@ -95,7 +121,7 @@ func SealHandoff(h Handoff, recipient *ecdh.PublicKey) ([]byte, error) {
 		return nil, fmt.Errorf("protocol: handoff recipient key: %w", err)
 	}
 	kdf, aead := suite()
-	enc, sender, err := hpke.NewSender(pk, kdf, aead, info(infoHandoffHPKE, &h.AccountID, h.Epoch))
+	enc, sender, err := hpke.NewSender(pk, kdf, aead, handoffInfo(h.AccountID, h.Epoch, binding))
 	if err != nil {
 		return nil, fmt.Errorf("protocol: handoff sender: %w", err)
 	}
@@ -115,6 +141,16 @@ func SealHandoff(h Handoff, recipient *ecdh.PublicKey) ([]byte, error) {
 		Out(), nil
 }
 
+// handoffInfo length-prefixes the binding, so a binding cannot be shifted into
+// the account id or the epoch by choosing its length.
+func handoffInfo(acct AccountID, epoch uint64, binding []byte) []byte {
+	return NewEncoder(infoHandoffHPKE).
+		Fixed(acct[:]).
+		U64(epoch).
+		Bytes(binding).
+		Out()
+}
+
 func handoffCommitContext(acct AccountID, epoch, counter uint64) string {
 	return string(NewEncoder(infoHandoffCommit).
 		Fixed(acct[:]).
@@ -128,9 +164,12 @@ func handoffCommitContext(acct AccountID, epoch, counter uint64) string {
 // Same commitment discipline as the escrow: the exporter tag is compared in
 // constant time BEFORE the AEAD, so a chosen ciphertext fails before it
 // produces any plaintext at all rather than being noticed afterwards.
-func OpenHandoff(object []byte, acct AccountID, epoch, counter uint64, recipient *ecdh.PrivateKey) (*Handoff, error) {
+func OpenHandoff(object []byte, acct AccountID, epoch, counter uint64, recipient *ecdh.PrivateKey, binding []byte) (*Handoff, error) {
 	if counter == 0 {
 		return nil, errors.New("handoff: counters start at 1")
+	}
+	if len(binding) == 0 {
+		return nil, errors.New("handoff: no binding; an unbound handoff is one a relay could have sealed")
 	}
 
 	d := NewDecoder(domainHandoffObject, object)
@@ -150,7 +189,7 @@ func OpenHandoff(object []byte, acct AccountID, epoch, counter uint64, recipient
 		return nil, fmt.Errorf("handoff: recipient key: %w", err)
 	}
 	kdf, aead := suite()
-	r, err := hpke.NewRecipient(enc, sk, kdf, aead, info(infoHandoffHPKE, &acct, epoch))
+	r, err := hpke.NewRecipient(enc, sk, kdf, aead, handoffInfo(acct, epoch, binding))
 	if err != nil {
 		return nil, fmt.Errorf("handoff: recipient context: %w", err)
 	}
@@ -196,34 +235,63 @@ func OpenHandoff(object []byte, acct AccountID, epoch, counter uint64, recipient
 // needs, and is where the joiner stops trusting the device that paired it.
 //
 // The chain is verified from genesis against the root key and the epoch key the
-// HANDOFF carried, not against anything the server said. A chain verified
-// against a key the server supplied is not verified.
+// HANDOFF carried, never against anything the server said.
+//
+// AND AGAINST THE HANDOFF'S OWN HEAD ENTRY, which is the anti-truncation
+// anchor and which an earlier version of this function ignored entirely. The M1
+// review proved the consequence: a chain truncated one entry before a revoke
+// verified cleanly, and the revoked device was still in the adopted set. The
+// head entry is signed, so a server cannot forge one -- it can only serve a
+// chain that stops short of it, and that is exactly what this catches.
 func (h *Handoff) Adopt(chain []byte) (*EpochKeys, *Verified, error) {
 	keys, err := DeriveEpoch(h.AKSeed, h.AccountID, h.Epoch)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Epoch 1's signing key is what genesis was signed with. If this handoff is
-	// for a later epoch, the chain establishes the earlier keys as it is
-	// verified -- but epoch 1's has to come from somewhere, and for a joining
-	// device that is the genesis entry itself, which the handoff's head entry
-	// does not necessarily contain.
-	//
-	// So: when the handoff is for epoch 1, the key derived above IS epoch 1's.
-	// For a later epoch the joiner asks the pairing device for the chain and
-	// verifies it against the root key, which covers every root-signed
-	// transition; a hygiene rotation chain still needs epoch 1, and that case
-	// is why a joining device is given the chain by a device that holds it
-	// rather than fetching it cold.
+	// Epoch 1's signing key is what genesis was signed with. When the handoff
+	// is for epoch 1, the key derived above IS that key; for a later epoch the
+	// chain establishes the earlier ones as it is verified, and the root key
+	// covers every transition.
 	var epoch1 ed25519.PublicKey
 	if h.Epoch == 1 {
 		epoch1 = keys.Sign.Public().(ed25519.PublicKey)
 	}
 
-	v, err := VerifyChain(chain, h.AccountID, h.RootSignPub, epoch1, nil)
+	// The head entry gives a pin, so the rollback check has something to
+	// compare against even though this device has no history of its own.
+	head, _, err := DecodeEntry(h.HeadEntry)
+	if err != nil {
+		return nil, nil, fmt.Errorf("handoff: its head entry does not decode: %w", err)
+	}
+	headHash, err := head.Hash()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	v, err := VerifyChain(chain, h.AccountID, h.RootSignPub, epoch1,
+		&Pin{Seq: head.Seq, Hash: headHash})
 	if err != nil {
 		return nil, nil, fmt.Errorf("handoff: the chain did not verify: %w", err)
 	}
+
+	// The chain must actually have reached the epoch the handoff is for. A
+	// handoff for epoch 3 against a chain that ends in epoch 2 means the server
+	// is serving a chain older than the key it also served, which is not a
+	// state an honest one can be in.
+	if v.Epoch != h.Epoch {
+		return nil, nil, fmt.Errorf("handoff: it carries epoch %d but the chain ends in epoch %d",
+			h.Epoch, v.Epoch)
+	}
+
+	// And the derived epoch key must be the one the chain names, so a handoff
+	// carrying somebody else's AK is caught rather than adopted.
+	if v.EpochSign != nil {
+		derived := keys.Sign.Public().(ed25519.PublicKey)
+		if !bytes.Equal(v.EpochSign, derived) {
+			return nil, nil, errors.New("handoff: its epoch key is not the one the chain names")
+		}
+	}
+
 	return keys, v, nil
 }

@@ -288,3 +288,43 @@ func TestAFrameOneWithoutTheInitiatorKeyIsRefused(t *testing.T) {
 		t.Fatal("Join accepted a frame 1 with no initiator key")
 	}
 }
+
+// M1 REVIEW, MEDIUM: the confirmation and SAS labels were unprefixed
+// concatenations, so two different key pairs could produce one label -- shift a
+// byte from the end of one key to the start of the next and the bytes are
+// identical. Not exploitable here today, because SPAKE2 stops a relay choosing
+// the secret and the roster's fixed-width fields stop a key of another width
+// reaching this. But "two inputs, one label" is the shape of a real bug.
+func TestLabelsCannotBeShiftedIntoOneAnother(t *testing.T) {
+	secret := bytes.Repeat([]byte{0x42}, 32)
+	id := bytes.Repeat([]byte{0x11}, 16)
+
+	// Two splits of the same concatenated bytes.
+	all := bytes.Repeat([]byte{0xab}, 64)
+	initA, joinA := all[:32], all[32:]
+	initB, joinB := all[:31], all[31:]
+
+	confA1, confB1, err := confirmations(secret, id, initA, joinA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confA2, confB2, err := confirmations(secret, id, initB, joinB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(confA1, confA2) || bytes.Equal(confB1, confB2) {
+		t.Error("two different key splits produced the same confirmation")
+	}
+
+	sas1, err := DeriveSAS(secret, id, initA, joinA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sas2, err := DeriveSAS(secret, id, initB, joinB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sas1.Indices == sas2.Indices {
+		t.Error("two different key splits produced the same emoji")
+	}
+}

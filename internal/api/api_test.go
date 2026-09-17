@@ -1,7 +1,11 @@
 package api_test
 
 import (
+	"bytes"
+	"context"
 	"crypto/ed25519"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -218,4 +222,56 @@ func TestTheServerRefusesARosterGap(t *testing.T) {
 	if err := c.AppendRoster(gap); err == nil {
 		t.Fatal("the server accepted a roster entry that leaves a gap")
 	}
+}
+
+// M1 REVIEW, MEDIUM: a request authorization was replayable.
+//
+// The review measured it against a live instance: the same nonce accepted four
+// times, and under a second session token. A signature that can be replayed
+// authorises every future identical request, and "identical" includes the
+// DELETE somebody captured once.
+//
+// The fix is a spent set rather than a timestamp window, because the protocol
+// is explicit that ts is display-only and that nothing load-bearing may depend
+// on a clock an attacker controls.
+func TestARequestAuthorizationCannotBeReplayed(t *testing.T) {
+	srv, db := instance(t)
+	c := client.New(srv.URL, true)
+	if _, err := c.Register("quiet-otter-41", invite(t, db)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Login(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture one authorised request exactly as it went out.
+	captured, err := c.CapturedRequestForTest("GET", "/v1/roster")
+	if err != nil {
+		t.Fatalf("building a request: %v", err)
+	}
+
+	first, err := srv.Client().Do(cloneRequest(t, captured))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Body.Close()
+	if first.StatusCode != 200 {
+		t.Fatalf("the first request returned %d, want 200", first.StatusCode)
+	}
+
+	replay, err := srv.Client().Do(cloneRequest(t, captured))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replay.Body.Close()
+	if replay.StatusCode != 401 {
+		t.Fatalf("the replayed request returned %d, want 401", replay.StatusCode)
+	}
+}
+
+func cloneRequest(t *testing.T, r *http.Request) *http.Request {
+	t.Helper()
+	out := r.Clone(context.Background())
+	out.Body = io.NopCloser(bytes.NewReader(nil))
+	return out
 }

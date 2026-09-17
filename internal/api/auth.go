@@ -40,6 +40,24 @@ type authState struct {
 	mu         sync.Mutex
 	challenges map[string]challengeRecord
 	sessions   map[string]sessionRecord
+	// spent holds request nonces that have already been used.
+	//
+	// WITHOUT IT AN AUTHORIZATION IS REPLAYABLE. The M1 review measured it
+	// against a live instance: the same nonce was accepted four times, and
+	// under a second session token. A signature that can be replayed is a
+	// signature that authorises every future identical request, and "identical"
+	// includes the DELETE somebody captured once.
+	//
+	// The fix is a spent set, not a timestamp. The protocol is explicit that
+	// ts is display-only and that nothing load-bearing may depend on a clock an
+	// attacker controls, so an expiry window would be validating against
+	// exactly what it must not trust. The set is bounded by the session
+	// lifetime instead: entries are swept with their session.
+	spent map[string]spentRecord
+}
+
+type spentRecord struct {
+	expires time.Time
 }
 
 type challengeRecord struct {
@@ -58,6 +76,7 @@ func newAuthState() *authState {
 	return &authState{
 		challenges: map[string]challengeRecord{},
 		sessions:   map[string]sessionRecord{},
+		spent:      map[string]spentRecord{},
 	}
 }
 
@@ -72,6 +91,11 @@ func (a *authState) sweep(now time.Time) {
 	for k, v := range a.sessions {
 		if now.After(v.expires) {
 			delete(a.sessions, k)
+		}
+	}
+	for k, v := range a.spent {
+		if now.After(v.expires) {
+			delete(a.spent, k)
 		}
 	}
 }
@@ -249,9 +273,15 @@ func (s *Server) authed(next authedHandler) http.Handler {
 		}
 		copy(acct[:], raw)
 
+		nonce := mustDecode(r.Header.Get(nonceHeader))
+		if len(nonce) != protocol.NonceLen {
+			s.fail(w, http.StatusUnauthorized, errors.New("a request nonce is 32 bytes of hex"))
+			return
+		}
+
 		authz := protocol.Authz{
 			AccountID:   acct,
-			DeviceNonce: mustDecode(r.Header.Get(nonceHeader)),
+			DeviceNonce: nonce,
 			Method:      r.Method,
 			Path:        r.URL.Path,
 			BodyHash:    protocol.HashBody(body),
@@ -259,6 +289,22 @@ func (s *Server) authed(next authedHandler) http.Handler {
 		}
 		if err := protocol.Verify(ed25519.PublicKey(sess.device), authz, mustDecode(r.Header.Get(sigHeader))); err != nil {
 			s.fail(w, http.StatusUnauthorized, fmt.Errorf("request authorization: %w", err))
+			return
+		}
+
+		// A nonce is spent once, PER DEVICE. Keyed on the device rather than
+		// globally, so one account's traffic cannot deny another's by colliding
+		// -- and checked after the signature, so an unauthenticated caller
+		// cannot fill the set by guessing nonces.
+		key := string(sess.device) + "\x00" + string(nonce)
+		s.auth.mu.Lock()
+		_, replayed := s.auth.spent[key]
+		if !replayed {
+			s.auth.spent[key] = spentRecord{expires: sess.expires}
+		}
+		s.auth.mu.Unlock()
+		if replayed {
+			s.fail(w, http.StatusUnauthorized, errors.New("that request authorization has already been used"))
 			return
 		}
 

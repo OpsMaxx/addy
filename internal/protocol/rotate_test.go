@@ -213,7 +213,7 @@ func TestARevocationSealsToEachSurvivingDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, d := range v.Devices {
-		if err := r.SealTo(d, a.Root.AccountID, 2, rootPub, wire); err != nil {
+		if err := r.SealTo(d, a.Root.AccountID, 2, rootPub, wire, a.Epoch.AK); err != nil {
 			t.Fatalf("SealTo: %v", err)
 		}
 	}
@@ -226,7 +226,7 @@ func TestARevocationSealsToEachSurvivingDevice(t *testing.T) {
 	if obj == nil {
 		t.Fatal("no handoff was sealed for device B")
 	}
-	h, err := OpenHandoff(obj, a.Root.AccountID, 2, 2, b.Enc)
+	h, err := OpenHandoff(obj, a.Root.AccountID, 2, 2, b.Enc, a.Epoch.AK)
 	if err != nil {
 		t.Fatalf("OpenHandoff: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestARevocationSealsToEachSurvivingDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, o := range r.Handoffs {
-		if _, err := OpenHandoff(o, a.Root.AccountID, 2, 2, outsider.Enc); err == nil {
+		if _, err := OpenHandoff(o, a.Root.AccountID, 2, 2, outsider.Enc, a.Epoch.AK); err == nil {
 			t.Fatal("a device outside the surviving set opened a handoff")
 		}
 	}

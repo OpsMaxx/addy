@@ -138,14 +138,11 @@ func DeriveSAS(sharedSecret, pairingID, initiatorPubSign, joinerPubSign []byte) 
 // sasLabel is the ASCII label, a NUL, then the pairing id and both signing
 // keys. Order is fixed: initiator then joiner, so the two sides build the same
 // bytes without negotiating.
+// Length-prefixed for the same reason the confirmation label is: an unprefixed
+// concatenation lets two different key pairs produce one label, which for a SAS
+// would mean two different pairings showing the same emoji.
 func sasLabel(pairingID, initiatorPubSign, joinerPubSign []byte) []byte {
-	out := make([]byte, 0, len(sasInfo)+1+len(pairingID)+len(initiatorPubSign)+len(joinerPubSign))
-	out = append(out, sasInfo...)
-	out = append(out, 0x00)
-	out = append(out, pairingID...)
-	out = append(out, initiatorPubSign...)
-	out = append(out, joinerPubSign...)
-	return out
+	return lengthPrefixed(sasInfo, pairingID, initiatorPubSign, joinerPubSign)
 }
 
 // sasBytesForTest exposes the six derived bytes so a test can recompute the bit
