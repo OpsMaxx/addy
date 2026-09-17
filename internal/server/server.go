@@ -230,14 +230,3 @@ func loadRoutes(ctx context.Context, db *store.DB, cfg Config) (*frontdoor.Table
 	}
 	return routes, nil
 }
-
-// Selftest proves a running instance actually works, rather than that its
-// process started. The distinction is the whole point: a relay that is up and
-// cannot relay is the worst first impression the product can make.
-//
-// quick is what the container healthcheck runs every thirty seconds, so it
-// checks the instance is answering and stops there. The full cycle -- pair,
-// sync, revoke, recover -- arrives with the milestones that implement those.
-func Selftest(ctx context.Context, target string, quick bool) error {
-	return errors.New("selftest needs a running relay to test; it arrives with the milestone that makes one")
-}
