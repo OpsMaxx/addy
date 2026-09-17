@@ -1131,6 +1131,17 @@ shape `internal/protocol/vectors_test.go` should take.
 > The mnemonic is the all-zero-entropy BIP39 phrase. None of it may ever appear
 > outside a test.
 
+> **Known inconsistency, 2026-09-17.** The pairing vector's code is
+> `42-inkwell-flatfoot`, which is `DESIGN.md`'s illustrative example. Neither
+> word is in the shipped 256-word list (`internal/pair/wordlists/codewords.txt`),
+> so `pair.NormaliseCode` refuses it and a test driving this vector through the
+> real code path would fail. The list is right and the example is not:
+> "flatfoot" is slang for a police officer, which fails the list's own rule that
+> a word must be innocuous. The vector is regenerated with a real code when the
+> pairing exchange is implemented; recorded here rather than silently patched,
+> because the derived PAKE password and SAS depend on the code and must be
+> recomputed together.
+
 ### 13.1 Shape
 
 ```
@@ -1222,10 +1233,12 @@ escrow commit     abf06e7b706f39c69f50b9e8546cf47fc4dbde4999e08f5bc50feade3f6b13
 
 ### 13.5 Regenerating
 
-The generator is a `go run` target under `internal/protocol/` with no inputs
-other than the constants in this document. Regenerating MUST be a no-op: if the
-file changes, either this specification changed or something drifted, and CI
-fails on the diff. `govulncheck` keeps the CIRCL pin at or above v1.6.3 —
+The generator lands as a `go run` target under `internal/protocol/` with the
+first M1 commit — it has no inputs other than the constants in this document.
+(The build that produced the committed file is the M1 spec's scratch generator;
+porting it in is the first task of M1, not a rewrite.) Regenerating MUST be a
+no-op: if the file changes, either this specification changed or something
+drifted, and CI fails on the diff. `govulncheck` keeps the CIRCL pin at or above v1.6.3 —
 GO-2026-4550 / CVE-2026-1229 is open below it.
 
 ---
