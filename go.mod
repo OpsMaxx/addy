@@ -3,6 +3,7 @@ module github.com/opsmaxx/addy
 go 1.26.5
 
 require (
+	github.com/blinklabs-io/go-bip39 v0.2.0 // indirect
 	github.com/caddyserver/certmagic v0.25.4 // indirect
 	github.com/caddyserver/zerossl v0.1.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
