@@ -87,7 +87,9 @@ func serve(args []string) error {
 	var cfg server.Config
 	fs.StringVar(&cfg.DataDir, "data-dir", server.DefaultDataDir, "Directory for the metadata database and local state")
 	fs.BoolVar(&cfg.Dev, "dev", false, "Localhost mode: self-signed certificate, no domain, no ACME, blobs on local disk")
-	fs.StringVar(&cfg.Addr, "addr", "", "Address to bind (default :443, or 127.0.0.1:8443 with -dev)")
+	fs.StringVar(&cfg.Addr, "addr", "", "TLS address to bind (default :443, or 127.0.0.1:8443 with -dev)")
+	fs.StringVar(&cfg.HTTPAddr, "http-addr", "", "Plain HTTP address to bind (default :80, or 127.0.0.1:8080 with -dev). ACME HTTP-01 arrives here or not at all")
+	fs.StringVar(&cfg.Email, "email", "", "Contact address for the ACME account, so the CA can warn you before a renewal fails")
 	fs.BoolVar(&cfg.UI, "ui", false, "Serve the web portal")
 	if err := fs.Parse(args); err != nil {
 		return err

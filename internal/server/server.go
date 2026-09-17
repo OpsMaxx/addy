@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 
+	"github.com/opsmaxx/addy/internal/frontdoor"
+	"github.com/opsmaxx/addy/internal/portal"
 	"github.com/opsmaxx/addy/internal/store"
 )
 
@@ -17,8 +20,10 @@ import (
 type Config struct {
 	DataDir  string
 	Addr     string
+	HTTPAddr string
 	Dev      bool
 	UI       bool
+	Email    string
 	Version  string
 	BuildSha string
 }
@@ -62,6 +67,19 @@ func (c Config) resolvedAddr() string {
 	return ":443"
 }
 
+// The plain-HTTP port is not optional in production: certmagic obtains
+// certificates with an ACME HTTP-01 challenge, and that challenge arrives on
+// port 80 or not at all.
+func (c Config) resolvedHTTPAddr() string {
+	if c.HTTPAddr != "" {
+		return c.HTTPAddr
+	}
+	if c.Dev {
+		return "127.0.0.1:8080"
+	}
+	return ":80"
+}
+
 // Run starts the relay and blocks until ctx is cancelled.
 func Run(ctx context.Context, cfg Config) error {
 	log := slog.Default()
@@ -84,17 +102,117 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer db.Close()
 
+	routes, err := loadRoutes(ctx, db, cfg)
+	if err != nil {
+		return err
+	}
+
+	// No consumers yet: the services that need certificates as files arrive
+	// with the service wizards. The exporter is wired now because dev mode
+	// drives it through the same entry point the ACME hook uses, so the path
+	// is exercised from the first commit rather than first exercised in
+	// production sixty days after an install.
+	export := frontdoor.NewExporter(nil)
+
+	tlsConf, challenge, magic, err := frontdoor.NewACME(frontdoor.ACMEConfig{
+		Dev:     cfg.Dev,
+		Email:   cfg.Email,
+		DataDir: cfg.DataDir,
+		Routes:  routes,
+		Export:  export,
+	})
+	if err != nil {
+		return err
+	}
+
+	if cfg.Dev {
+		if err := frontdoor.DevCertificate(ctx, magic, export, routes.Hosts()); err != nil {
+			return err
+		}
+	} else if hosts := routes.Hosts(); len(hosts) > 0 {
+		// Asynchronously, so a CA that is slow or unreachable delays
+		// certificates rather than the whole process starting.
+		if err := magic.ManageAsync(ctx, hosts); err != nil {
+			return fmt.Errorf("managing certificates: %w", err)
+		}
+	}
+
+	// Headless by default. The portal is a web surface on a box whose whole
+	// pitch is that it holds nothing worth attacking, so an operator who does
+	// not want one should not be running one.
+	var terminated http.Handler = http.NotFoundHandler()
+	if cfg.UI {
+		pages, err := portal.Handler(portal.Config{Version: cfg.Version, BuildSha: cfg.BuildSha})
+		if err != nil {
+			return fmt.Errorf("building the portal: %w", err)
+		}
+		terminated = portal.NoServiceWorker(pages)
+	}
+
+	door := &frontdoor.Door{
+		Routes:           routes,
+		Handler:          terminated,
+		TLSConfig:        tlsConf,
+		ChallengeHandler: challenge,
+		HTTPSAddr:        cfg.resolvedAddr(),
+		HTTPAddr:         cfg.resolvedHTTPAddr(),
+		Log:              log,
+	}
+
 	log.Info("addy starting",
 		"version", cfg.Version,
 		"build", cfg.BuildSha,
 		"data_dir", cfg.DataDir,
-		"addr", cfg.resolvedAddr(),
+		"https", cfg.resolvedAddr(),
+		"http", cfg.resolvedHTTPAddr(),
+		"hosts", routes.Hosts(),
+		"portal", cfg.UI,
 		"dev", cfg.Dev,
 	)
 
-	<-ctx.Done()
+	err = door.Run(ctx)
 	log.Info("addy stopping")
-	return nil
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
+// loadRoutes builds the routing table from the database.
+//
+// In dev the table is seeded with localhost rather than read from disk, so a
+// fresh `addy serve -dev` serves something immediately. It is still a real
+// route through the real table, which means Table.Decide -- including its
+// refusal of everything else -- runs in dev exactly as it does in production.
+func loadRoutes(ctx context.Context, db *store.DB, cfg Config) (*frontdoor.Table, error) {
+	routes := frontdoor.NewTable()
+
+	stored, err := db.Domains(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range stored {
+		if err := routes.Set(frontdoor.Route{
+			Host:    d.Hostname,
+			Mode:    frontdoor.Mode(d.Mode),
+			Backend: d.Backend,
+			HTTP80:  d.HTTP80,
+		}); err != nil {
+			return nil, fmt.Errorf("loading the stored route for %s: %w", d.Hostname, err)
+		}
+	}
+
+	if cfg.Dev {
+		for _, host := range []string{"localhost", "addy.localhost"} {
+			if _, ok := routes.Lookup(host); ok {
+				continue
+			}
+			if err := routes.Set(frontdoor.Route{Host: host, Mode: frontdoor.Terminate}); err != nil {
+				return nil, fmt.Errorf("seeding the development route for %s: %w", host, err)
+			}
+		}
+	}
+	return routes, nil
 }
 
 // Selftest proves a running instance actually works, rather than that its
