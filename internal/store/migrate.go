@@ -51,6 +51,70 @@ var migrations = []string{
 		value      TEXT NOT NULL,
 		updated_at INTEGER NOT NULL
 	)`,
+
+	// 3. Accounts, rosters and objects.
+	//
+	// EVERYTHING HERE IS T1 METADATA. The roster chain is public by
+	// construction -- signed, and holding only device public keys and sealed
+	// labels. Objects are opaque bytes the server cannot read. The server holds
+	// no key that opens anything in this schema, which is why it can be an
+	// ordinary SQLite file.
+	//
+	// account_id is client-asserted: it arrives as a public key the server has
+	// never seen and cannot vouch for, which is the point. An admin issues an
+	// invite granting a quota slot; the token is spent by an account the user
+	// minted themselves, so a stolen invite costs disk space rather than data.
+	`CREATE TABLE accounts (
+		account_id    TEXT PRIMARY KEY,
+		root_sign_pub BLOB NOT NULL,
+		created_at    INTEGER NOT NULL,
+		quota_bytes   INTEGER NOT NULL DEFAULT 0,
+		CHECK (length(account_id) = 32),
+		CHECK (length(root_sign_pub) = 32)
+	)`,
+
+	// The roster is stored as entries rather than one blob, so a client can
+	// fetch from a sequence number it already has. seq is unique per account,
+	// which is the server's only structural check -- it cannot verify a
+	// signature it has no key for, and does not try.
+	`CREATE TABLE roster_entries (
+		account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+		seq        INTEGER NOT NULL,
+		wire       BLOB NOT NULL,
+		stored_at  INTEGER NOT NULL,
+		PRIMARY KEY (account_id, seq)
+	)`,
+
+	// Objects: collections, escrow and handoffs, all opaque.
+	//
+	// The counter is stored beside the object because a reader needs it to
+	// check the escrow commitment, and it is T1 metadata the server holds
+	// anyway. A server that LIES about it is caught by the commitment, which is
+	// the check doing its job rather than a gap.
+	`CREATE TABLE objects (
+		account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+		name       TEXT NOT NULL,
+		epoch      INTEGER NOT NULL,
+		counter    INTEGER NOT NULL,
+		body       BLOB NOT NULL,
+		etag       TEXT NOT NULL,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (account_id, name, epoch)
+	)`,
+
+	// Invites. THE INVITE ROW IS THE AUTHORIZATION: an invitation record is
+	// itself permission to register, bypassing "signups disabled" entirely.
+	// That means an instance with no mail server, or an air-gapped one, can
+	// still onboard a second user -- the admin creates the invite and hands the
+	// token over by any means they like.
+	`CREATE TABLE invites (
+		token_hash BLOB PRIMARY KEY,
+		created_at INTEGER NOT NULL,
+		expires_at INTEGER NOT NULL,
+		spent_by   TEXT,
+		spent_at   INTEGER,
+		CHECK (length(token_hash) = 32)
+	)`,
 }
 
 func (d *DB) migrate(ctx context.Context) error {
