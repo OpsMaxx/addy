@@ -103,6 +103,12 @@ func statusFor(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, store.ErrNoAccount):
 		return http.StatusNotFound
+	case errors.Is(err, store.ErrOverQuota):
+		// 507, so a client can distinguish "you are out of room" from every
+		// other refusal and say so with what to delete -- rather than showing a
+		// generic error and quietly stopping, which is the worst version of
+		// this feature.
+		return http.StatusInsufficientStorage
 	case errors.Is(err, store.ErrInviteUnknown), errors.Is(err, store.ErrInviteSpent),
 		errors.Is(err, store.ErrInviteExpired):
 		return http.StatusForbidden

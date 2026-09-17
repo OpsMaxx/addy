@@ -191,6 +191,13 @@ func (d *DB) PutObject(ctx context.Context, accountID string, o Object, ifMatch 
 			}
 		}
 
+		// Checked against the size this write ADDS, inside the same
+		// transaction that performs it -- so two concurrent writes cannot both
+		// see room for the last byte.
+		if err := checkQuota(ctx, tx, accountID, int64(len(o.Body)), o.Name, o.Epoch); err != nil {
+			return err
+		}
+
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO objects (account_id, name, epoch, counter, body, etag, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)
