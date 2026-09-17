@@ -35,6 +35,7 @@ Usage:
 
 Commands:
   serve       Run the relay
+  preflight   Check this box can actually obtain a certificate, before installing
   selftest    Prove a running instance actually works end to end
   version     Print version information
 
@@ -54,6 +55,8 @@ func main() {
 		err = serve(args)
 	case "selftest":
 		err = selftest(args)
+	case "preflight":
+		err = preflight(args)
 	case "version", "--version", "-version":
 		printVersion()
 		return
@@ -90,10 +93,23 @@ func serve(args []string) error {
 	fs.StringVar(&cfg.Addr, "addr", "", "TLS address to bind (default :443, or 127.0.0.1:8443 with -dev)")
 	fs.StringVar(&cfg.HTTPAddr, "http-addr", "", "Plain HTTP address to bind (default :80, or 127.0.0.1:8080 with -dev). ACME HTTP-01 arrives here or not at all")
 	fs.StringVar(&cfg.Email, "email", "", "Contact address for the ACME account, so the CA can warn you before a renewal fails")
+	fs.StringVar(&cfg.Domain, "domain", "", "The hostname this instance answers on. Seeds the routing table on a fresh install")
 	fs.BoolVar(&cfg.UI, "ui", false, "Serve the web portal")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Environment fills in only what a flag did not set. Flags win, because a
+	// person typing one on the command line is answering a question the
+	// environment answered earlier and less specifically.
+	//
+	// Only the variables something actually reads are listed. The compose file
+	// sets several more for the object store and TURN; those arrive with the
+	// milestones that use them, and wiring a variable to nothing now would
+	// mean an operator setting it and watching it do nothing.
+	envDefault(&cfg.DataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
+	envDefault(&cfg.Domain, "ADDY_DOMAIN", "")
+	envDefault(&cfg.Email, "ADDY_ACME_EMAIL", "")
+
 	cfg.Version = Version
 	cfg.BuildSha = BuildSha
 
@@ -109,8 +125,41 @@ func serve(args []string) error {
 func selftest(args []string) error {
 	fs := flag.NewFlagSet("selftest", flag.ExitOnError)
 	target := fs.String("target", "", "Instance to test (default: the local one)")
+	// -quick is what the container healthcheck runs. It must not perform a
+	// full pair/sync/revoke/recover cycle every thirty seconds.
+	quick := fs.Bool("quick", false, "Check the instance is answering, without running a full cycle")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return server.Selftest(context.Background(), *target)
+	return server.Selftest(context.Background(), *target, *quick)
+}
+
+// preflight answers the one question a shell on the box cannot answer for
+// itself: whether the world can reach port 80.
+func preflight(args []string) error {
+	fs := flag.NewFlagSet("preflight", flag.ExitOnError)
+	domain := fs.String("domain", "", "The hostname to validate")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	envDefault(domain, "ADDY_DOMAIN", "")
+	if *domain == "" {
+		return errors.New("preflight needs -domain")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return server.Preflight(ctx, *domain)
+}
+
+// envDefault fills target from the environment if a flag left it empty, and
+// falls back to fallback if neither said anything.
+func envDefault(target *string, key, fallback string) {
+	if *target != "" {
+		return
+	}
+	if v := os.Getenv(key); v != "" {
+		*target = v
+		return
+	}
+	*target = fallback
 }

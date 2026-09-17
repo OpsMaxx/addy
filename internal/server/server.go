@@ -24,6 +24,7 @@ type Config struct {
 	Dev      bool
 	UI       bool
 	Email    string
+	Domain   string
 	Version  string
 	BuildSha string
 }
@@ -202,6 +203,21 @@ func loadRoutes(ctx context.Context, db *store.DB, cfg Config) (*frontdoor.Table
 		}
 	}
 
+	// A fresh install has nothing in the database, so the domain the installer
+	// was given is what gets it its first route -- and therefore its first
+	// certificate. Without this an operator would install addy, start it, and
+	// find that it refuses every hostname including its own.
+	if cfg.Domain != "" {
+		if _, ok := routes.Lookup(cfg.Domain); !ok {
+			if err := routes.Set(frontdoor.Route{Host: cfg.Domain, Mode: frontdoor.Terminate}); err != nil {
+				return nil, fmt.Errorf("seeding the route for %s: %w", cfg.Domain, err)
+			}
+			if err := db.PutDomain(ctx, store.Domain{Hostname: cfg.Domain, Mode: string(frontdoor.Terminate)}); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	if cfg.Dev {
 		for _, host := range []string{"localhost", "addy.localhost"} {
 			if _, ok := routes.Lookup(host); ok {
@@ -218,6 +234,10 @@ func loadRoutes(ctx context.Context, db *store.DB, cfg Config) (*frontdoor.Table
 // Selftest proves a running instance actually works, rather than that its
 // process started. The distinction is the whole point: a relay that is up and
 // cannot relay is the worst first impression the product can make.
-func Selftest(ctx context.Context, target string) error {
-	return errors.New("selftest needs a running instance to test; not implemented until the relay serves traffic")
+//
+// quick is what the container healthcheck runs every thirty seconds, so it
+// checks the instance is answering and stops there. The full cycle -- pair,
+// sync, revoke, recover -- arrives with the milestones that implement those.
+func Selftest(ctx context.Context, target string, quick bool) error {
+	return errors.New("selftest needs a running relay to test; it arrives with the milestone that makes one")
 }

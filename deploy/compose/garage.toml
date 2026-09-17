@@ -1,0 +1,28 @@
+# Garage's configuration. Written by install.sh, mode 0644 -- it holds no
+# secret, because every secret arrives by environment from .env.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir     = "/var/lib/garage/data"
+db_engine    = "lmdb"
+
+# Required by --single-node. Garage refuses to start without it and says so
+# clearly, which is the good kind of failure.
+replication_factor = 1
+
+rpc_bind_addr = "127.0.0.1:3901"
+# rpc_secret arrives as GARAGE_RPC_SECRET. No rpc_public_addr: there is no
+# second node to contact this one, and leaving it unset stops `garage node id`
+# printing an address that would mislead anyone who read it.
+
+[s3_api]
+s3_region     = "garage"
+api_bind_addr = "[::]:3900"
+# No root_domain, deliberately. Without it, vhost-style bucket addressing does
+# not exist at all -- which is why minio.BucketLookupPath is mandatory in the
+# client rather than merely recommended.
+
+[admin]
+api_bind_addr = "[::]:3903"
+# No admin_token and no metrics_token. Upstream discourages the config-file
+# master tokens now that scoped, expiring ones exist, and 3903 is published to
+# 127.0.0.1 only, so /metrics is unreachable from off-box regardless.
