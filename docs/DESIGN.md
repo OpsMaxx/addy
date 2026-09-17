@@ -35,6 +35,44 @@
 > `:60-68`, `electron-builder.yml:71-78`, `SECURITY.md:52` / `:54` / `:55` /
 > `:79` / `:81`.
 
+> **Correction, 2026-09-17: SPAKE2. `salsa.debian.org/vasudev/gospake2` is NOT
+> USED.** The design selects it, vendored. A security review of the vendored copy
+> — `docs/spake2-review.md` — returned DO NOT USE, on five findings, three of them
+> critical. The decisive one is not a bug that could be fixed: **its M and N are
+> not the RFC 9382 constants and have no published derivation.** SPAKE2's security
+> rests entirely on nobody knowing their discrete logs to the base point, and the
+> standard values earn that by being the reproducible output of a fixed
+> derivation anyone can recompute. These are four unexplained integers in a
+> source file. They cannot be shown to be *unknown*, and that is exactly the
+> assumption this product buys SPAKE2 to rely on.
+>
+> Also found: a remote unauthenticated panic on seven of eight hostile frames;
+> variable-time scalar multiplication on the password scalar; a variable-length
+> element encoding that is the cause of the integer group's 3% failure and is
+> **also present in the ed25519 path**, masked only by a byte-order accident and a
+> missing length check; and an anti-reflection check that fails open in roughly
+> 0.3% of sessions as a result.
+>
+> Deleting the integer group does not rescue it: the path addy would actually use
+> carries the same encoding bug, crashes on adversarial input, leaks the password
+> through timing, and rests on constants nobody can vouch for.
+>
+> **addy implements SPAKE2 on `filippo.io/edwards25519`, following RFC 9382.**
+> Roughly 150 lines, with M and N as RFC 9382 §4 publishes them, constant-time
+> scalar arithmetic, `SetBytes` that validates canonical encoding and on-curve
+> membership without a panic path, fixed-width 32-byte output, RFC 9382's own
+> length-prefixed transcript, and the confirmation MACs this design requires and
+> that library never provided.
+>
+> One factual correction to the paragraph below: it says gospake2 is "the same
+> library wormhole-william itself uses". That cannot be right as stated —
+> wormhole-william interoperates with Python magic-wormhole, which uses the RFC
+> 9382 constants, and this library cannot. Noted under the same rule this project
+> applies elsewhere: verify against the source, not the README.
+>
+> **The decision to vendor rather than pin was correct and paid for itself
+> immediately.** Pinning would have shipped all five findings unread.
+
 ---
 
 # addy — an E2EE satellite relay for OpsMaxx
