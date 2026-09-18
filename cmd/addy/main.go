@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/opsmaxx/addy/internal/frontdoor"
 	"github.com/opsmaxx/addy/internal/server"
@@ -40,6 +41,7 @@ Commands:
   serve       Run the relay
   preflight   Check this box can actually obtain a certificate, before installing
   selftest    Prove a running instance actually works end to end
+  invite      Mint the token a device needs in order to register
   join        Print the addy:// string a device uses to add this instance
   panic       Rotate every secret this box holds and stop serving devices
   reonboard   Show or clear the reonboard-required flag panic and reset set
@@ -65,6 +67,8 @@ func main() {
 		err = selftest(args)
 	case "preflight":
 		err = preflight(args)
+	case "invite":
+		err = invite(args)
 	case "join":
 		err = join(args)
 	case "panic":
@@ -369,4 +373,23 @@ func (m *multiFlag) values() map[string]string {
 		out[strings.TrimSpace(k)] = v
 	}
 	return out
+}
+
+// invite mints or lists registration tokens.
+//
+// Console-only. There is deliberately no route that creates one: a route that
+// did would be a route an attacker with any foothold uses to grant themselves
+// a quota slot.
+func invite(args []string) error {
+	fs := flag.NewFlagSet("invite", flag.ExitOnError)
+	dataDir := fs.String("data", "", "Data directory (default: "+server.DefaultDataDir+")")
+	ttl := fs.Duration("ttl", 24*time.Hour, "How long the token is good for")
+	list := fs.Bool("list", false, "Show outstanding invites instead of minting one")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	envDefault(dataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
+	return server.Invite(context.Background(), server.InviteOptions{
+		DataDir: *dataDir, TTL: *ttl, List: *list,
+	})
 }
