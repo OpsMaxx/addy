@@ -174,6 +174,45 @@ var migrations = []string{
 	)`,
 
 	`CREATE INDEX pastes_sweep ON pastes (deleted_at)`,
+
+	// 6. Store-and-forward.
+	//
+	// WebRTC needs both ends awake. A clipboard that only works when the other
+	// laptop is on is not a clipboard, and a file transfer that requires
+	// choreography is a worse email attachment -- so a payload that cannot be
+	// delivered live is left here for the peer to collect.
+	//
+	// Every row is SEALED TO ONE DEVICE. The server routes on `to_device`, a
+	// public key it can compare but not use, and stores bytes it cannot read.
+	// That is the same position it is in for objects; what is new is that a
+	// message has a recipient, so the server learns who talks to whom inside
+	// one account. That is stated in the threat model rather than pretended
+	// away: within an account, the relay sees the social graph of the user's
+	// own devices, which is a graph of one person.
+	//
+	// `expires_at` is not optional and not large. A mailbox is a place things
+	// accumulate, and an undelivered clipboard entry from three weeks ago is
+	// not useful to anybody -- it is a copy of something secret that outlived
+	// every reason to keep it.
+	`CREATE TABLE mailbox (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id TEXT NOT NULL,
+		to_device  BLOB NOT NULL,
+		from_device BLOB NOT NULL,
+		kind       TEXT NOT NULL,
+		sealed     BLOB NOT NULL,
+		created_at INTEGER NOT NULL,
+		expires_at INTEGER NOT NULL,
+		FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE,
+		CHECK (length(to_device) = 32),
+		CHECK (length(from_device) = 32)
+	)`,
+
+	// Delivery reads by recipient and id; the sweep reads by expiry. Two
+	// indexes because they are two different scans and the sweep would
+	// otherwise be a full table walk on a timer.
+	`CREATE INDEX mailbox_delivery ON mailbox (account_id, to_device, id)`,
+	`CREATE INDEX mailbox_sweep ON mailbox (expires_at)`,
 }
 
 func (d *DB) migrate(ctx context.Context) error {

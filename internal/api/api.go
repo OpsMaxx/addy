@@ -83,6 +83,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/paste/{id}", s.getPaste)
 	mux.HandleFunc("POST /v1/paste/{id}/burn", s.burnPaste)
 
+	// Store-and-forward. The sender and the recipient are both taken from the
+	// session, never from the request: a `from` a client could set would let
+	// one device leave mail appearing to come from another, and a `for` would
+	// let it read another device's.
+	mux.Handle("POST /v1/mail", s.authed(s.leaveMail))
+	mux.Handle("GET /v1/mail", s.authed(s.collectMail))
+	mux.Handle("POST /v1/mail/ack", s.authed(s.ackMail))
+
 	return mux
 }
 
@@ -132,6 +140,14 @@ func statusFor(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, store.ErrNoAccount):
 		return http.StatusNotFound
+	case errors.Is(err, store.ErrMailboxFull):
+		// 507 like a quota, because it is the same shape of problem from the
+		// sender's point of view -- the far end has no room -- and a client
+		// that already handles "out of space" handles this without a second
+		// branch.
+		return http.StatusInsufficientStorage
+	case errors.Is(err, store.ErrMessageTooLarge), errors.Is(err, store.ErrPasteTooLarge):
+		return http.StatusRequestEntityTooLarge
 	case errors.Is(err, store.ErrOverQuota):
 		// 507, so a client can distinguish "you are out of room" from every
 		// other refusal and say so with what to delete -- rather than showing a
