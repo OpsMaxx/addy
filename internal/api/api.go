@@ -103,6 +103,13 @@ func (s *Server) Handler() http.Handler {
 	// to use the operator's bandwidth.
 	mux.Handle("GET /v1/turn", s.authed(s.turn))
 
+	// Conflict copies. The loser of a conditional PUT keeps its own bytes
+	// here, immediately after its 409 -- that is the only moment they exist
+	// anywhere but in its memory.
+	mux.Handle("POST /v1/obj/{name}/conflict", s.authed(s.keepConflict))
+	mux.Handle("GET /v1/conflicts", s.authed(s.listConflicts))
+	mux.Handle("POST /v1/conflicts/{id}/resolve", s.authed(s.resolveConflict))
+
 	return mux
 }
 

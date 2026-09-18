@@ -669,6 +669,16 @@ func (c *Client) Turn() (mode, url string, err error) {
 	return out.Mode, out.URL, nil
 }
 
+// RawRequest makes one signed call and hands back the response untouched.
+//
+// For the routes this client has no typed method for -- conflicts today,
+// whatever arrives next -- and for tests that want to see a status code rather
+// than an error. The signing is the part worth not reimplementing; the
+// decoding is not.
+func (c *Client) RawRequest(method, path string, payload any) (*http.Response, error) {
+	return c.do(method, path, payload)
+}
+
 // Changes waits for change pointers.
 //
 // The server already drops this device's own writes, so what comes back is
