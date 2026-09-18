@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -272,4 +274,14 @@ func TestDatabaseFilesAreNotReadableByOthers(t *testing.T) {
 	if seen == 0 {
 		t.Fatal("no database files found; the test is looking in the wrong place")
 	}
+}
+
+// readRepoFile reads a path relative to the repository root, so a test can
+// assert something about a document without hard-coding how deep it is.
+func readRepoFile(rel string) ([]byte, error) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(strings.TrimSpace(string(out)), rel))
 }
