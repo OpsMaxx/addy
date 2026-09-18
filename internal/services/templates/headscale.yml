@@ -1,0 +1,35 @@
+# headscale, behind addy's front door.
+# Written by `addy service install headscale` at ${GENERATED_AT}.
+#
+# WHAT BREAKS IF THIS IS WRONG
+#
+# - headscale listens on loopback only. addy terminates TLS on 443 and proxies
+#   here; publishing 8080 would put an unauthenticated control plane on the
+#   public interface.
+# - DERP is off. Turning it on binds 3478/udp, which is addy's TURN port --
+#   they cannot both have it. If you want DERP, move addy's relay first with
+#   `-turn-port`, or point devices at an external relay with `-turn`.
+
+services:
+  headscale:
+    image: headscale/headscale:0.26.1
+    container_name: addy-headscale
+    restart: unless-stopped
+    command: serve
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./headscale-config.yaml:/etc/headscale/config.yaml:ro
+      - headscale-data:/var/lib/headscale
+    environment:
+      HEADSCALE_SERVER_URL: "https://${DOMAIN}"
+      HEADSCALE_PREFIXES_V4: "${HEADSCALE_PREFIX}"
+      HEADSCALE_DERP_SERVER_ENABLED: "${HEADSCALE_DERP}"
+    healthcheck:
+      test: ["CMD", "headscale", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  headscale-data:

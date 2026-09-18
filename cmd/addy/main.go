@@ -14,9 +14,11 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/opsmaxx/addy/internal/server"
+	"github.com/opsmaxx/addy/internal/services"
 )
 
 // Stamped by the build script with -ldflags -X. The defaults are what a plain
@@ -41,6 +43,7 @@ Commands:
   panic       Rotate every secret this box holds and stop serving devices
   reonboard   Show or clear the reonboard-required flag panic and reset set
   reset       Delete every account on this box (--hard), after showing what goes
+  service     List, check, preview and install the services addy can deploy beside itself
   version     Print version information
 
 Run "addy <command> -h" for the flags a command takes.
@@ -69,6 +72,8 @@ func main() {
 		err = reonboard(args)
 	case "reset":
 		err = reset(args)
+	case "service", "services":
+		err = service(args)
 	case "version", "--version", "-version":
 		printVersion()
 		return
@@ -258,4 +263,94 @@ func reset(args []string) error {
 	return server.Reset(context.Background(), server.ResetOptions{
 		DataDir: *dataDir, Hard: *hard, Yes: *yes,
 	})
+}
+
+// service is the wizards.
+//
+// Four verbs and no interactive prompt loop. A wizard that asks nine questions
+// at a terminal is a wizard nobody can script, and every answer here is a flag
+// so that `addy service install` works the same from a shell, from an
+// installer, and from the portal when it grows one.
+func service(args []string) error {
+	if len(args) == 0 {
+		services.List(os.Stdout)
+		return nil
+	}
+	verb, rest := args[0], args[1:]
+
+	fs := flag.NewFlagSet("service "+verb, flag.ExitOnError)
+	dataDir := fs.String("data", "", "Data directory (default: "+server.DefaultDataDir+")")
+	domain := fs.String("domain", "", "This instance's hostname")
+	var set multiFlag
+	fs.Var(&set, "set", "KEY=VALUE for a wizard field. Repeatable")
+
+	switch verb {
+	case "list":
+		services.List(os.Stdout)
+		return nil
+	case "show", "check", "preview", "install":
+		if len(rest) == 0 {
+			return fmt.Errorf("`addy service %s` needs a service id; `addy service list` names them", verb)
+		}
+		id := rest[0]
+		if err := fs.Parse(rest[1:]); err != nil {
+			return err
+		}
+		envDefault(dataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
+		envDefault(domain, "ADDY_DOMAIN", "")
+
+		if verb == "show" {
+			return services.Show(os.Stdout, id)
+		}
+		svc, err := services.Find(id)
+		if err != nil {
+			return err
+		}
+		cfg := services.Config{
+			Values:     set.values(),
+			Domain:     *domain,
+			DeployDir:  *dataDir,
+			DockerHost: os.Getenv("DOCKER_HOST"),
+		}
+		if verb == "check" {
+			services.Report(os.Stdout, svc, services.Check(svc, cfg))
+			return nil
+		}
+		if verb == "preview" {
+			// What would be written, before anything is. An operator handed a
+			// compose file they have not read is an operator running something
+			// they did not author.
+			body, err := services.Preview(svc, cfg)
+			if err != nil {
+				return err
+			}
+			fmt.Print(body)
+			return nil
+		}
+		return services.Install(os.Stdout, svc, cfg)
+	default:
+		return fmt.Errorf("unknown `addy service` verb %q; try list, show, check, preview or install", verb)
+	}
+}
+
+// multiFlag collects repeated -set KEY=VALUE.
+type multiFlag []string
+
+func (m *multiFlag) String() string { return strings.Join(*m, ",") }
+
+func (m *multiFlag) Set(v string) error {
+	if !strings.Contains(v, "=") {
+		return fmt.Errorf("-set wants KEY=VALUE, got %q", v)
+	}
+	*m = append(*m, v)
+	return nil
+}
+
+func (m *multiFlag) values() map[string]string {
+	out := make(map[string]string, len(*m))
+	for _, pair := range *m {
+		k, v, _ := strings.Cut(pair, "=")
+		out[strings.TrimSpace(k)] = v
+	}
+	return out
 }

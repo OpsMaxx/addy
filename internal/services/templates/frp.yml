@@ -1,0 +1,39 @@
+# frps, behind addy's front door.
+# Written by `addy service install frp` at ${GENERATED_AT}. Edit freely; addy
+# does not read this back, and re-running the wizard overwrites it.
+#
+# WHAT BREAKS IF THIS IS WRONG
+#
+# - frps' HTTPS vhost is NOT published on 443. addy owns 80 and 443 and routes
+#   by SNI; frp traffic arrives through it as TLS passthrough. Publishing 443
+#   here is the four-way collision the front door exists to prevent, and the
+#   symptom is whichever of the two lost the race failing to bind at boot.
+# - 7000 is the control port and it IS public, because frpc connects to it from
+#   outside. The token below is the only thing between it and anyone who finds
+#   it.
+
+services:
+  frps:
+    image: snowdreamtech/frps:0.65.0
+    container_name: addy-frps
+    restart: unless-stopped
+    ports:
+      - "7000:7000"
+      # The vhost port, LOOPBACK ONLY. addy terminates or passes through on 443
+      # and forwards here.
+      - "127.0.0.1:7500:7500"
+    volumes:
+      - ./frps.toml:/etc/frp/frps.toml:ro
+    healthcheck:
+      test: ["CMD", "/usr/bin/frps", "verify", "-c", "/etc/frp/frps.toml"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# frps.toml, written beside this file:
+#
+#   bindPort = 7000
+#   vhostHTTPSPort = 7500
+#   auth.method = "token"
+#   auth.token = "${FRP_TOKEN}"
+#   subDomainHost = "${DOMAIN}"

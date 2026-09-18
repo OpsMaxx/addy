@@ -1,0 +1,30 @@
+# OpenVPN.
+# Written by `addy service install openvpn` at ${GENERATED_AT}.
+#
+# WHAT BREAKS IF THIS IS WRONG
+#
+# - The CA lives in the `openvpn-data` volume. That volume is the most valuable
+#   thing on this box: whoever has it can mint a client certificate for your
+#   network whenever they like. Back it up somewhere that is not this box, and
+#   know how you would revoke before you need to.
+# - Initialisation is a one-time manual step and deliberately not automated
+#   here. It asks for a passphrase, and a wizard that generated a CA with a
+#   passphrase it chose would be a wizard that knows your CA passphrase:
+#
+#     docker compose run --rm openvpn ovpn_genconfig -u udp://${DOMAIN}:${OVPN_PORT}
+#     docker compose run --rm -it openvpn ovpn_initpki
+
+services:
+  openvpn:
+    image: kylemanna/openvpn:2.4
+    container_name: addy-openvpn
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "${OVPN_PORT}:1194/udp"
+    volumes:
+      - openvpn-data:/etc/openvpn
+
+volumes:
+  openvpn-data:
