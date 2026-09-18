@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+<!--
+  NO OPENGRAPH TAGS, AND THAT IS DELIBERATE.
+
+  og:title and friends are an instruction to every chat client and mail
+  scanner to fetch this URL and render a preview. For an ordinary page that is
+  a feature. For a one-time paste it is the failure the whole feature dies of:
+  the preview fetch consumes the paste and the human gets an empty page.
+
+  The robots meta and the X-Robots-Tag header ask the crawlers that read them
+  not to. What actually works is that burning requires a POST, which none of
+  them issue -- see internal/api/paste.go. This absence is the third layer,
+  and it costs nothing.
+-->
+<title>A message for you</title>
+<link rel="stylesheet" href="/assets/portal.css">
+</head>
+<body>
+<main class="paste">
+  <h1>A message for you</h1>
+
+  <!-- Every state is in the document and hidden, rather than built by script,
+       so the CSP can forbid inline script and eval without the page needing
+       either. -->
+  <section id="loading">
+    <p class="lede">Checking&hellip;</p>
+  </section>
+
+  <section id="ready" hidden>
+    <p class="lede" id="ready-note"></p>
+    <div id="password-row" hidden>
+      <label for="password">This message is password protected.</label>
+      <input type="password" id="password" autocomplete="off" spellcheck="false">
+    </div>
+    <button id="reveal">Show me the message</button>
+    <p class="fine" id="burn-warning" hidden>
+      Reading it uses it up. Once you press this, nobody else can open this
+      link &mdash; including you, if you close the page.
+    </p>
+  </section>
+
+  <section id="revealed" hidden>
+    <p class="fine" id="revealed-meta"></p>
+    <pre id="body"></pre>
+    <button id="copy">Copy</button>
+    <p class="fine">
+      This page holds the only copy now. It is not saved anywhere, and
+      reloading loses it.
+    </p>
+  </section>
+
+  <section id="problem" hidden class="warn">
+    <h2 id="problem-title"></h2>
+    <p id="problem-detail"></p>
+  </section>
+
+  <section class="warn">
+    <h2>Never type your recovery phrase here</h2>
+    <p>
+      Your recovery phrase belongs in the OpsMaxx desktop app and nowhere else.
+      This page has no field for it, and a page that asks you for it is an
+      attack.
+    </p>
+  </section>
+</main>
+<script src="/assets/paste.js"></script>
+</body>
+</html>

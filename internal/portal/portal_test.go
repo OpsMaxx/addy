@@ -76,26 +76,68 @@ var inlineHandler = regexp.MustCompile(`(?i)\son[a-z]+\s*=`)
 // by weakening the CSP. So the markup is asserted directly: if this fails, fix
 // the markup, not the policy.
 func TestTheMarkupDoesNotNeedAWeakerPolicy(t *testing.T) {
-	index := readAsset(t, "index.html")
-	if anyScript.MatchString(emptyScriptPair.ReplaceAllString(index, "")) {
-		t.Error("index.html contains an inline <script> body; the CSP forbids it")
-	}
-	if inlineStyleAttr.MatchString(index) {
-		t.Error("index.html contains a style= attribute; the CSP forbids it")
-	}
-	if inlineHandler.MatchString(index) {
-		t.Error("index.html contains an inline event handler; the CSP forbids it")
+	// Every shipped page, not just index.html. The rule was written when there
+	// was one page; the page it protects least well is always the one added
+	// after the test.
+	for _, name := range shippedPages(t) {
+		page := readAsset(t, name)
+		if anyScript.MatchString(emptyScriptPair.ReplaceAllString(page, "")) {
+			t.Errorf("%s contains an inline <script> body; the CSP forbids it", name)
+		}
+		if inlineStyleAttr.MatchString(page) {
+			t.Errorf("%s contains a style= attribute; the CSP forbids it", name)
+		}
+		if inlineHandler.MatchString(page) {
+			t.Errorf("%s contains an inline event handler; the CSP forbids it", name)
+		}
 	}
 }
 
-// The fragment carries a paste's decryption key. Nothing the portal ships may
-// read it -- not to be clever, not to be helpful, not once.
-func TestNoShippedScriptReadsTheURLFragment(t *testing.T) {
+// shippedPages is every .html the portal embeds, discovered rather than
+// listed: a page added without being added here would be a page none of the
+// rules above applied to.
+func shippedPages(t *testing.T) []string {
+	t.Helper()
 	sub, err := fs.Sub(assets, "web")
 	if err != nil {
 		t.Fatalf("fs.Sub: %v", err)
 	}
-	checked := 0
+	var out []string
+	err = fs.WalkDir(sub, ".", func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".html") {
+			out = append(out, path)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("found no pages; the walk is wrong, not the portal")
+	}
+	return out
+}
+
+// The fragment carries a paste's decryption key.
+//
+// EXACTLY ONE SHIPPED SCRIPT MAY READ IT, and this names it. The rule was
+// written when the portal was a status page and nothing legitimately needed
+// the fragment; the paste reader does, because reading it is the entire
+// mechanism -- the key is in the fragment precisely so the server never gets
+// it, and something on the page has to turn it back into a key.
+//
+// So the assertion narrows rather than relaxes: every other script is still
+// forbidden, and the one exception is a list of one that somebody has to edit
+// in a diff a reviewer sees. A helpful `location.hash` in a status widget
+// would be an exfiltration path for whatever paste the user opened last.
+var mayReadTheFragment = map[string]bool{"paste.js": true}
+
+func TestOnlyThePasteReaderReadsTheURLFragment(t *testing.T) {
+	sub, err := fs.Sub(assets, "web")
+	if err != nil {
+		t.Fatalf("fs.Sub: %v", err)
+	}
+	checked, allowed := 0, 0
 	err = fs.WalkDir(sub, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".js") {
 			return err
@@ -105,16 +147,18 @@ func TestNoShippedScriptReadsTheURLFragment(t *testing.T) {
 			return err
 		}
 		checked++
-		body := string(b)
-		// Skip the comment that explains the rule.
+		if mayReadTheFragment[path] {
+			allowed++
+			return nil
+		}
 		for _, needle := range []string{"location.hash", "window.location.hash", ".hash"} {
-			for _, line := range strings.Split(body, "\n") {
+			for _, line := range strings.Split(string(b), "\n") {
 				trimmed := strings.TrimSpace(line)
 				if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") {
 					continue
 				}
 				if strings.Contains(line, needle) {
-					t.Errorf("%s reads the URL fragment: %s", path, trimmed)
+					t.Errorf("%s reads the URL fragment and is not the paste reader: %s", path, trimmed)
 				}
 			}
 		}
@@ -126,18 +170,80 @@ func TestNoShippedScriptReadsTheURLFragment(t *testing.T) {
 	if checked == 0 {
 		t.Fatal("checked 0 scripts; the filter is wrong, not the code")
 	}
+	// The exception must name something that exists. A stale entry here would
+	// silently stop guarding a file that was renamed.
+	if allowed != len(mayReadTheFragment) {
+		t.Fatalf("the exception list names %d files but %d were found; it is stale",
+			len(mayReadTheFragment), allowed)
+	}
+}
+
+// And the one script that may read the fragment must never send it anywhere.
+//
+// This is the assertion that replaces what the blanket ban used to give for
+// free. Reading the key is the feature; putting it in a URL, a request body, a
+// header or an image source is the whole failure the fragment design exists to
+// prevent -- and it is one careless line, in a file whose whole subject is
+// that key.
+func TestThePasteReaderNeverTransmitsTheKey(t *testing.T) {
+	sub, err := fs.Sub(assets, "web")
+	if err != nil {
+		t.Fatalf("fs.Sub: %v", err)
+	}
+	b, err := fs.ReadFile(sub, "paste.js")
+	if err != nil {
+		t.Fatalf("reading paste.js: %v", err)
+	}
+
+	// Every identifier the key is held under. A new one is a new name to add
+	// here, which is the point: the check is on the names, so renaming past it
+	// takes a deliberate edit.
+	keyNames := []string{"fragment", "fragmentKey", "location.hash", "password"}
+	sinks := []string{"fetch(", "XMLHttpRequest", "sendBeacon", "new Image", "new WebSocket", "document.cookie"}
+
+	lines := strings.Split(string(b), "\n")
+	found := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") {
+			continue
+		}
+		for _, sink := range sinks {
+			if !strings.Contains(line, sink) {
+				continue
+			}
+			found++
+			for _, name := range keyNames {
+				if strings.Contains(line, name) {
+					t.Errorf("paste.js:%d sends %q to %q: %s", i+1, name, sink, trimmed)
+				}
+			}
+		}
+	}
+	if found == 0 {
+		// The reader fetches twice -- a status GET and a burn POST -- so zero
+		// sinks means the scan matched nothing and the test proved nothing.
+		t.Fatal("found no network calls in paste.js; the scan is wrong, not the code")
+	}
 }
 
 // Nothing to unfurl means nothing prefetches a paste into oblivion.
-func TestThePageCarriesNoOpenGraphTags(t *testing.T) {
-	index := strings.ToLower(readAsset(t, "index.html"))
-	for _, needle := range []string{`property="og:`, `name="twitter:`, `property='og:`} {
-		if strings.Contains(index, needle) {
-			t.Errorf("index.html carries %s; a link preview would fetch the paste", needle)
+//
+// The paste page matters most here and was not covered when this was written
+// against index.html alone: og:title on THAT page is a direct instruction to
+// every chat client to fetch the paste URL and render a preview, which is the
+// failure the whole feature dies of.
+func TestNoPageCarriesOpenGraphTags(t *testing.T) {
+	for _, name := range shippedPages(t) {
+		page := strings.ToLower(readAsset(t, name))
+		for _, needle := range []string{`property="og:`, `name="twitter:`, `property='og:`} {
+			if strings.Contains(page, needle) {
+				t.Errorf("%s carries %s; a link preview would fetch the paste", name, needle)
+			}
 		}
-	}
-	if !strings.Contains(index, `name="robots"`) {
-		t.Error("index.html is missing its robots meta tag")
+		if !strings.Contains(page, `name="robots"`) {
+			t.Errorf("%s is missing its robots meta tag", name)
+		}
 	}
 }
 

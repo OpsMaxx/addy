@@ -53,6 +53,25 @@ func Handler(cfg Config) (http.Handler, error) {
 		})
 	})
 
+	// The paste reader. One page for every paste: the id is in the path and
+	// the KEY is in the fragment, which never reaches this handler -- so this
+	// serves the same bytes to everyone and learns nothing by doing it.
+	//
+	// It does NOT look the paste up. Rendering "already read" server-side
+	// would mean this GET touching the row, and a GET that touches the row is
+	// one step from a GET that consumes it. The page asks, over the API, after
+	// it loads.
+	mux.HandleFunc("GET /p/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		page, err := fs.ReadFile(sub, "paste.html")
+		if err != nil {
+			http.Error(w, "portal unavailable", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(page)
+	})
+
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		index, err := fs.ReadFile(sub, "index.html")

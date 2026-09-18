@@ -136,6 +136,44 @@ var migrations = []string{
 		spent_at   INTEGER,
 		CHECK (length(token_hash) = 32)
 	)`,
+
+	// 5. One-time pastes.
+	//
+	// THE SERVER HOLDS NO KEY TO ANY OF THIS. `sealed` is the body AND its
+	// metadata -- filename, content type, whatever the sender wrote -- as one
+	// ciphertext, because encrypting the body and leaving the metadata in the
+	// clear is how a paste service tells you someone sent `id_rsa` without
+	// being able to tell you what was in it.
+	//
+	// The three limits are deliberately THREE COLUMNS and not one, because
+	// they are orthogonal questions that a single "is it still good" field
+	// conflates:
+	//
+	//   expires_at  when it stops being readable
+	//   max_views   how many times it may be read
+	//   deleted_at  when the row itself goes
+	//
+	// Conflating them loses the case that matters most for a human: a paste
+	// that has expired or been burned still EXISTS for a while, so the reader
+	// gets "this was used already" instead of "no such paste", and the sender
+	// can tell "they read it" from "I sent the wrong link". A row deleted the
+	// instant it burned cannot tell those apart, and both people then guess.
+	`CREATE TABLE pastes (
+		id         TEXT PRIMARY KEY,
+		sealed     BLOB NOT NULL,
+		created_at INTEGER NOT NULL,
+		expires_at INTEGER NOT NULL,
+		max_views  INTEGER NOT NULL,
+		views      INTEGER NOT NULL DEFAULT 0,
+		deleted_at INTEGER NOT NULL,
+		owner      TEXT NOT NULL,
+		CHECK (length(id) >= 16),
+		CHECK (max_views >= 0),
+		CHECK (views >= 0),
+		CHECK (deleted_at >= expires_at)
+	)`,
+
+	`CREATE INDEX pastes_sweep ON pastes (deleted_at)`,
 }
 
 func (d *DB) migrate(ctx context.Context) error {

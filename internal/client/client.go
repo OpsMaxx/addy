@@ -517,6 +517,38 @@ func (c *Client) GetObject(name string, epoch uint64) (*StoredObject, error) {
 	return &StoredObject{Body: body, Counter: out.Counter, ETag: out.ETag}, nil
 }
 
+// CreatePaste stores a sealed blob and returns its id.
+//
+// `sealed` is already ciphertext when it gets here: body and metadata
+// together, sealed under a key derived from the 128-bit secret that goes in
+// the URL fragment. This client never sees that secret and neither does the
+// server -- the caller keeps it and puts it after the `#`, which browsers do
+// not send.
+func (c *Client) CreatePaste(sealed []byte, ttlSeconds int64, maxViews int) (string, error) {
+	resp, err := c.do(http.MethodPost, "/v1/paste", map[string]any{
+		"sealed":     base64.StdEncoding.EncodeToString(sealed),
+		"ttlSeconds": ttlSeconds,
+		"maxViews":   maxViews,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("client: creating a paste: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if out.ID == "" {
+		return "", errors.New("client: the server returned a paste with no id")
+	}
+	return out.ID, nil
+}
+
 // Changes waits for change pointers.
 //
 // The server already drops this device's own writes, so what comes back is

@@ -72,6 +72,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/signal", s.authed(s.signal))
 	mux.Handle("GET /v1/changes", s.authed(s.changes))
 
+	// Pastes. Creating needs an account; READING deliberately does not -- the
+	// recipient of a link has none, and cannot be made to get one.
+	mux.Handle("POST /v1/paste", s.authed(s.createPaste))
+	mux.Handle("GET /v1/pastes", s.authed(s.listPastes))
+	mux.Handle("DELETE /v1/paste/{id}", s.authed(s.deletePaste))
+	// GET reports; POST consumes. A prefetching chat client, mail scanner or
+	// link previewer issues the first and never the second, which is what
+	// stops a link burning before the human opens it.
+	mux.HandleFunc("GET /v1/paste/{id}", s.getPaste)
+	mux.HandleFunc("POST /v1/paste/{id}/burn", s.burnPaste)
+
 	return mux
 }
 
@@ -93,8 +104,21 @@ func (s *Server) fail(w http.ResponseWriter, status int, err error) {
 }
 
 func (s *Server) ok(w http.ResponseWriter, v any) {
+	s.okStatus(w, http.StatusOK, v)
+}
+
+// okStatus is ok with a status other than 200, for the cases where the body is
+// still meaningful -- 410 on a burned paste being the one that matters, since
+// the page has to tell the reader it WAS a paste and is gone, which a bare
+// error body cannot.
+//
+// Split out rather than letting callers write the header themselves: a
+// WriteHeader after Encode is silently ignored and logs a warning nobody
+// reads, so the 410 would have gone out as a 200 with a body saying "gone".
+func (s *Server) okStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
 

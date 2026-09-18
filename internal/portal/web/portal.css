@@ -42,3 +42,57 @@ section.warn {
 p { margin: 0 0 .75rem; }
 footer { border-top: 1px solid var(--rule); padding-top: 1rem; margin-top: 2.5rem; }
 footer p { color: var(--muted); font-size: .8rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
+
+/* The paste reader. Its own block rather than reusing the status page's, since
+   the two have nothing in common but the frame. */
+main.paste #body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--panel, #14181f);
+  border: 1px solid var(--line, #262d3d);
+  border-radius: 8px;
+  padding: 14px;
+  max-height: 60vh;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+main.paste input[type='password'] {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  margin: 6px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #262d3d);
+  border-radius: 6px;
+  background: var(--panel, #14181f);
+  color: inherit;
+  font: inherit;
+}
+
+main.paste button {
+  padding: 9px 16px;
+  border: 1px solid var(--line, #262d3d);
+  border-radius: 6px;
+  background: var(--panel, #14181f);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+main.paste button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+main.paste .fine {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* `hidden` has to beat the display rules above it, or every state renders at
+   once on a page whose whole design is that only one does. */
+main.paste [hidden] {
+  display: none !important;
+}
