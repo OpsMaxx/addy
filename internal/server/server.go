@@ -52,6 +52,11 @@ type Config struct {
 	// The overlay control plane. Off unless HeadscaleURL is set; the API key
 	// is powerful -- it can create and delete nodes, users and keys across the
 	// whole coordination server -- which is why nothing here has a default.
+	// ACMECA overrides the certificate authority. Empty means Let's Encrypt
+	// production; `-acme-staging` sets it to their staging directory, which is
+	// what a test on a hoster's shared default hostname must use.
+	ACMECA string
+
 	HeadscaleURL    string
 	HeadscaleAPIKey string
 	HeadscaleUser   string
@@ -144,6 +149,7 @@ func Run(ctx context.Context, cfg Config) error {
 	export := frontdoor.NewExporter(nil)
 
 	tlsConf, challenge, magic, err := frontdoor.NewACME(frontdoor.ACMEConfig{
+		CA:      cfg.ACMECA,
 		Dev:     cfg.Dev,
 		Email:   cfg.Email,
 		DataDir: cfg.DataDir,

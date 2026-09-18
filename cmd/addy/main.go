@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/opsmaxx/addy/internal/frontdoor"
 	"github.com/opsmaxx/addy/internal/server"
 	"github.com/opsmaxx/addy/internal/services"
 )
@@ -117,6 +118,9 @@ func serve(args []string) error {
 	fs.IntVar(&cfg.TurnPort, "turn-port", 0, "UDP port for the embedded TURN relay (default 3478)")
 	fs.StringVar(&cfg.TurnSecret, "turn-secret", "",
 		"Long-term secret TURN credentials are derived from. Generated and stored on first run if unset")
+	staging := fs.Bool("acme-staging", false,
+		"Use Let's Encrypt's staging CA. Certificates are untrusted by browsers; use it when testing on a hostname you do not own, because production rate limits are per registered domain and a hoster's default hostname is shared with every other customer")
+	fs.StringVar(&cfg.ACMECA, "acme-ca", "", "ACME directory URL. Overrides -acme-staging")
 	fs.StringVar(&cfg.HeadscaleURL, "headscale-url", "",
 		"headscale's API base URL, for minting overlay join keys. Usually http://127.0.0.1:8080 when the wizard deployed it")
 	fs.StringVar(&cfg.HeadscaleAPIKey, "headscale-apikey", "",
@@ -144,6 +148,10 @@ func serve(args []string) error {
 	envDefault(&cfg.TurnExternal, "ADDY_TURN_EXTERNAL", "")
 	envDefault(&cfg.HeadscaleURL, "ADDY_HEADSCALE_URL", "")
 	envDefault(&cfg.HeadscaleAPIKey, "ADDY_HEADSCALE_APIKEY", "")
+
+	if cfg.ACMECA == "" && *staging {
+		cfg.ACMECA = frontdoor.LetsEncryptStaging
+	}
 
 	cfg.Version = Version
 	cfg.BuildSha = BuildSha

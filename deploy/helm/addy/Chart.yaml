@@ -10,6 +10,13 @@ appVersion: "0.1.0"
 home: https://github.com/OpsMaxx/addy
 sources:
   - https://github.com/OpsMaxx/addy
+# NO `icon:`, and `helm lint` says INFO about it on every run.
+#
+# The field takes a URL, and the only honest values are a link to a file this
+# repository does not have or a data URI for an icon nobody has drawn. A dead
+# link in a chart somebody installs is worse than a hint in a linter nobody
+# reads, and an INFO is not a failure -- the chart lints with zero failures
+# either way.
 keywords:
   - sync
   - end-to-end-encryption

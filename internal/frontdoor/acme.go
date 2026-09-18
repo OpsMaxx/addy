@@ -12,7 +12,14 @@ import (
 )
 
 // ACMEConfig is what the front door needs in order to get certificates.
+// LetsEncryptStaging is the CA to point at when testing issuance. Named rather
+// than left as a URL in a script, because a URL in a script is a URL somebody
+// copies into production.
+const LetsEncryptStaging = "https://acme-staging-v02.api.letsencrypt.org/directory"
+
 type ACMEConfig struct {
+	// CA overrides the ACME directory. Empty means Let's Encrypt production.
+	CA      string
 	Dev     bool
 	Email   string
 	DataDir string
@@ -67,6 +74,24 @@ func NewACME(c ACMEConfig) (*tls.Config, func(http.Handler) http.Handler, *certm
 
 	certmagic.DefaultACME.Agreed = true
 	certmagic.DefaultACME.Email = c.Email
+
+	// The CA, overridable, and the reason is not developer convenience.
+	//
+	// Let's Encrypt rate-limits per REGISTERED DOMAIN: 50 certificates a week
+	// for everything under one. A hoster's default hostname --
+	// `vmi1234.example-host.net` -- is shared by every customer of that
+	// hoster, so testing against production there spends a limit that is not
+	// yours and breaks issuance for strangers. Staging exists for exactly this
+	// and issues from an untrusted root, which is the right trade for a test:
+	// it proves the whole HTTP-01 path, the order, the challenge and the
+	// installation, and the only thing it does not prove is that a browser
+	// trusts the result.
+	//
+	// Empty means production, so the default is unchanged and an operator has
+	// to ask for anything else.
+	if c.CA != "" {
+		certmagic.DefaultACME.CA = c.CA
+	}
 	// Both challenges stay enabled. addy owns :80 and :443, so certmagic's own
 	// solvers decline to bind and defer to the handlers wired here; disabling
 	// either would remove the only fallback the other has.

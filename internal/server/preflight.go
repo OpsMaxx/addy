@@ -122,16 +122,58 @@ func portIsFree(addr string) error {
 // see locally, the comparison fails for a box that works perfectly. So this
 // only catches the case where the name resolves to nothing at all, and leaves
 // the real verdict to the ACME order.
+//
+// ASKED OF A PUBLIC RESOLVER, NOT THIS BOX'S. The question is whether the
+// WORLD can find this name, and the local resolver answers a different one:
+// on a Contabo instance `net.DefaultResolver` consults /etc/hosts first and
+// reports the hostname as 127.0.1.1, which is true locally and useless here.
+// A preflight that prints a loopback address for a name that resolves
+// perfectly well in public is a preflight that sends an operator to debug DNS
+// that is already correct. Found by running it on a real box.
 func resolvesSomewhere(ctx context.Context, domain string) error {
-	addrs, err := net.DefaultResolver.LookupHost(ctx, domain)
+	addrs, via, err := lookupPublic(ctx, domain)
 	if err != nil {
 		return fmt.Errorf(`%s does not resolve: %w
 
 DNS has to be live BEFORE the certificate can be obtained, not eventually.
 Add the record, wait for it, and run this again`, domain, err)
 	}
-	fmt.Printf("  %s resolves to %v\n", domain, addrs)
+	fmt.Printf("  %s resolves to %v (asked %s)\n", domain, addrs, via)
 	return nil
+}
+
+// publicResolvers are asked in order. Two, from different operators, because
+// one being unreachable is a network policy rather than a DNS answer.
+var publicResolvers = []string{"1.1.1.1:53", "8.8.8.8:53"}
+
+// lookupPublic resolves via a public resolver, falling back to this box's own
+// and SAYING SO when it does.
+//
+// The fallback matters on a box whose egress to port 53 is blocked, which is a
+// legitimate configuration -- and there the local answer is the only one
+// available. What must not happen is reporting a local answer as though it
+// were the public one, which is the bug this replaced.
+func lookupPublic(ctx context.Context, domain string) (addrs []string, via string, err error) {
+	for _, server := range publicResolvers {
+		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		got, lookupErr := queryA(lookupCtx, server, domain)
+		cancel()
+		if lookupErr == nil && len(got) > 0 {
+			return got, server, nil
+		}
+		err = lookupErr
+	}
+
+	// Every public resolver refused or was unreachable. The local one is the
+	// only answer left, and the caller is told which it got.
+	got, localErr := net.DefaultResolver.LookupHost(ctx, domain)
+	if localErr != nil {
+		if err == nil {
+			err = localErr
+		}
+		return nil, "", err
+	}
+	return got, "this box's own resolver -- no public resolver was reachable, so this may not be what the world sees", nil
 }
 
 // self is the path to this binary, for the setcap hint. A hint naming the
