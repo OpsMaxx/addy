@@ -1,0 +1,33 @@
+{{- include "addy.validate" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "addy.fullname" . }}
+  labels: {{- include "addy.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  # Local, not Cluster. addy's front door routes by SNI and its logs name the
+  # client; kube-proxy's default SNAT replaces every source address with a node
+  # IP, so an operator reading an access log would see their own cluster.
+  {{- if eq .Values.service.type "LoadBalancer" }}
+  externalTrafficPolicy: Local
+  {{- end }}
+  selector:
+    app.kubernetes.io/name: {{ include "addy.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.service.httpPort }}
+      targetPort: http
+    - name: https
+      port: {{ .Values.service.httpsPort }}
+      targetPort: https
+    {{- if .Values.turn.enabled }}
+    - name: turn
+      port: {{ .Values.turn.port }}
+      targetPort: turn
+      protocol: UDP
+    {{- end }}

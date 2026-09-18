@@ -1,0 +1,74 @@
+# addy on Kubernetes. The same binary as the compose deployment; what differs
+# is everything around it.
+#
+# READ THIS BEFORE YOU DEPLOY
+#
+# addy terminates TLS ITSELF and routes by SNI. That is not a preference: it is
+# how four things share port 443 on one box -- the portal, the API, and the
+# services it proxies or passes through. Putting an ingress controller in front
+# of it undoes that, because the controller terminates TLS and addy then sees
+# one hostname for everything.
+#
+# So this chart defaults to a LoadBalancer Service carrying 80 and 443 straight
+# to the pod, and there is no ingress template. If your cluster cannot give you
+# that, the honest answer is that addy wants a box more than it wants a
+# cluster, and compose is a better fit than a chart that quietly gives up the
+# routing.
+
+image:
+  repository: ghcr.io/opsmaxx/addy
+  # Pinned rather than `latest`. A relay that changes version because a node
+  # rescheduled is one whose behaviour nobody can reason about.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The hostname devices reach. Required: addy refuses to serve a name it was not
+# configured for, which is what stops it answering for somebody else's.
+domain: ""
+
+# Contact address for the ACME account, so the CA can warn before a renewal
+# fails.
+acmeEmail: ""
+
+service:
+  type: LoadBalancer
+  # 80 must be reachable from the internet or ACME HTTP-01 cannot complete --
+  # not "should be", cannot. The preflight says so and so does this.
+  httpPort: 80
+  httpsPort: 443
+  annotations: {}
+
+# The embedded TURN relay.
+#
+# Off unless you give it a public IP. TURN puts that address in the protocol
+# and cannot infer it behind NAT or behind a Service, so a relay that guesses
+# allocates addresses nobody can reach -- and fails only under the NAT
+# conditions it exists for.
+turn:
+  enabled: false
+  publicIP: ""
+  port: 3478
+  # Must not include 51820. The chart refuses a range that does.
+  minPort: 52000
+  maxPort: 65535
+
+portal:
+  enabled: false
+
+persistence:
+  # The database, the certificate store and the ACME account key. Losing this
+  # means every device re-onboards and every certificate is reissued.
+  enabled: true
+  size: 5Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

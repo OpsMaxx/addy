@@ -1,0 +1,21 @@
+addy is deploying as {{ include "addy.fullname" . }}.
+
+  Domain    {{ .Values.domain }}
+  Portal    {{ if .Values.portal.enabled }}on{{ else }}off (headless -- the default){{ end }}
+  Relay     {{ if .Values.turn.enabled }}embedded, advertising {{ .Values.turn.publicIP }}{{ else }}NONE. Devices on networks that need one will not connect{{ end }}
+
+BEFORE IT CAN SERVE, two things have to be true and neither is Kubernetes'
+to arrange:
+
+  1. {{ .Values.domain }} resolves to this Service's external address.
+  2. Port 80 is reachable from the internet. ACME HTTP-01 arrives there or not
+     at all, and a certificate that cannot be issued is a relay that cannot be
+     reached.
+
+Check both before you debug anything else:
+
+    kubectl exec -it {{ include "addy.fullname" . }}-0 -- /addy preflight -domain {{ .Values.domain }}
+
+Then prove it actually works, rather than that it started:
+
+    kubectl exec -it {{ include "addy.fullname" . }}-0 -- /addy selftest -target {{ .Values.domain }} -data /var/lib/addy

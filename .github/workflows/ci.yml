@@ -35,6 +35,30 @@ jobs:
       - name: Check
         run: ./scripts/check.sh
 
+      # The chart's real gate. `internal/repocheck` checks what can be checked
+      # without Helm -- that it parses, that its two versions are separate
+      # fields, that the three refusals are still in the templates -- and this
+      # is the half that needs the binary: a template that does not render is
+      # a release that fails at `helm install`, on somebody else's cluster.
+      #
+      # Rendered with the values a real deployment uses, not with defaults:
+      # defaults have no domain, and the chart correctly refuses those.
+      - name: Helm chart
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          helm lint deploy/helm/addy --set domain=relay.example
+          helm template addy deploy/helm/addy \
+            --set domain=relay.example \
+            --set turn.enabled=true \
+            --set turn.publicIP=203.0.113.10 \
+            --set portal.enabled=true > /dev/null
+          # And that the refusals actually refuse. A guard rail nothing tests
+          # is a guard rail somebody deletes during a refactor.
+          ! helm template addy deploy/helm/addy > /dev/null 2>&1
+          ! helm template addy deploy/helm/addy --set domain=relay.example --set turn.enabled=true > /dev/null 2>&1
+          ! helm template addy deploy/helm/addy --set domain=relay.example --set turn.enabled=true \
+              --set turn.publicIP=203.0.113.10 --set turn.minPort=51000 > /dev/null 2>&1
+
       # The reason this is here rather than "nice to have later": the HPKE
       # library carries GO-2026-4550 / CVE-2026-1229 below v1.6.3. A pin that
       # drifts under it is a silent downgrade of the one primitive the whole
