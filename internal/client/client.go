@@ -549,6 +549,126 @@ func (c *Client) CreatePaste(sealed []byte, ttlSeconds int64, maxViews int) (str
 	return out.ID, nil
 }
 
+// MailItem is one message waiting for this device. `Sealed` is still sealed:
+// it was encrypted to this device's key by the sender, and the relay that
+// carried it could not read it.
+type MailItem struct {
+	ID         int64
+	FromDevice []byte
+	Kind       string
+	Sealed     []byte
+	CreatedAt  string
+}
+
+// LeaveMail stores a sealed payload for a device that is not connected.
+//
+// The SENDER is not a parameter: the server takes it from the session. A
+// client that could name its own sender could leave mail appearing to come
+// from another of the user's devices.
+func (c *Client) LeaveMail(toDevice []byte, kind string, sealed []byte) (int64, error) {
+	resp, err := c.do(http.MethodPost, "/v1/mail", map[string]any{
+		"toDevice": hex.EncodeToString(toDevice),
+		"kind":     kind,
+		"sealed":   base64.StdEncoding.EncodeToString(sealed),
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("client: leaving mail: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, err
+	}
+	return out.ID, nil
+}
+
+// CollectMail reads what is waiting for THIS device. It does not delete:
+// call AckMail once the plaintext is safely on disk.
+func (c *Client) CollectMail() ([]MailItem, error) {
+	resp, err := c.do(http.MethodGet, "/v1/mail", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("client: collecting mail: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		Messages []struct {
+			ID         int64  `json:"id"`
+			FromDevice string `json:"fromDevice"`
+			Kind       string `json:"kind"`
+			Sealed     string `json:"sealed"`
+			CreatedAt  string `json:"createdAt"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	items := make([]MailItem, 0, len(out.Messages))
+	for _, m := range out.Messages {
+		from, err := hex.DecodeString(m.FromDevice)
+		if err != nil {
+			return nil, fmt.Errorf("client: message %d names an unreadable sender", m.ID)
+		}
+		sealed, err := base64.StdEncoding.DecodeString(m.Sealed)
+		if err != nil {
+			return nil, fmt.Errorf("client: message %d has a body that is not base64", m.ID)
+		}
+		items = append(items, MailItem{
+			ID: m.ID, FromDevice: from, Kind: m.Kind, Sealed: sealed, CreatedAt: m.CreatedAt,
+		})
+	}
+	return items, nil
+}
+
+// AckMail deletes messages this device has. The only thing that deletes mail.
+func (c *Client) AckMail(ids []int64) (int64, error) {
+	resp, err := c.do(http.MethodPost, "/v1/mail/ack", map[string]any{"ids": ids})
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("client: acknowledging mail: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		Deleted int64 `json:"deleted"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, err
+	}
+	return out.Deleted, nil
+}
+
+// Turn asks how this instance expects devices to relay: "embedded", "external"
+// or "none". "none" is a real answer and not an error -- a device that cannot
+// relay needs to know that, so it can say so rather than fail to connect for
+// no stated reason.
+func (c *Client) Turn() (mode, url string, err error) {
+	resp, err := c.do(http.MethodGet, "/v1/turn", nil)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("client: asking about relaying: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		Mode string `json:"mode"`
+		URL  string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", "", err
+	}
+	return out.Mode, out.URL, nil
+}
+
 // Changes waits for change pointers.
 //
 // The server already drops this device's own writes, so what comes back is

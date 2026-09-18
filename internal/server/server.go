@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -203,10 +204,19 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		pages = portal.NoServiceWorker(p)
 	}
-	// Longest pattern wins, so this beats "/v1/" for exactly this path. /v1/meta
-	// is the portal's, because it is what an unauthenticated page reads to show
-	// its own build, and it is tested to expose nothing else.
-	mux.Handle("/v1/meta", pages)
+	// /v1/meta is served WHETHER OR NOT THE PORTAL IS ON, and that is a fix
+	// rather than a preference.
+	//
+	// It used to be mounted on `pages`, which is a 404 handler when -ui is
+	// off -- and the portal is headless by default. So on a default install
+	// the one endpoint `addy selftest` and the container healthcheck both
+	// fetch answered 404, which means the healthcheck failed forever and the
+	// selftest reported "something is listening and it is not addy" about addy.
+	// Found by running the selftest against a real instance rather than by
+	// reading it.
+	//
+	// Longest pattern wins, so this beats "/v1/" for exactly this path.
+	mux.Handle("/v1/meta", metaHandler(cfg))
 	mux.Handle("/", pages)
 
 	var terminated http.Handler = mux
@@ -329,4 +339,26 @@ func turnSecret(ctx context.Context, db *store.DB, configured string) (string, e
 		return "", err
 	}
 	return secret, nil
+}
+
+// metaHandler answers /v1/meta.
+//
+// A named function rather than a closure in Run so that a test can exercise
+// the real one without binding a port -- which is how the bug above went
+// unnoticed: every unit test built a portal, so the configuration that broke
+// was the only one nothing covered.
+func metaHandler(cfg Config) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		// A version string and a build hash, and deliberately nothing else.
+		// The endpoint is unauthenticated, so anything that identified the
+		// instance, counted its devices or named its users would hand a
+		// stranger the metadata the threat model spends its length promising
+		// to minimise.
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"version": cfg.Version,
+			"build":   cfg.BuildSha,
+		})
+	})
 }

@@ -148,12 +148,24 @@ func selftest(args []string) error {
 	fs := flag.NewFlagSet("selftest", flag.ExitOnError)
 	target := fs.String("target", "", "Instance to test (default: the local one)")
 	// -quick is what the container healthcheck runs. It must not perform a
-	// full pair/sync/revoke/recover cycle every thirty seconds.
+	// full register/sync/mail cycle every thirty seconds.
 	quick := fs.Bool("quick", false, "Check the instance is answering, without running a full cycle")
+	dataDir := fs.String("data", "",
+		"Data directory, so a run ON the box can mint its own invite and tidy up after itself")
+	inviteToken := fs.String("invite", "",
+		"An invite token, for a run from somewhere else. An invite IS the authorization to register, so the cycle needs one")
+	insecure := fs.Bool("insecure", false, "Accept a self-signed certificate, for -dev instances")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return server.Selftest(context.Background(), *target, *quick)
+	envDefault(dataDir, "ADDY_DATA_DIR", "")
+	return server.SelftestWith(context.Background(), server.SelftestOptions{
+		Target:   *target,
+		Quick:    *quick,
+		DataDir:  *dataDir,
+		Invite:   *inviteToken,
+		Insecure: *insecure,
+	})
 }
 
 // preflight answers the one question a shell on the box cannot answer for
