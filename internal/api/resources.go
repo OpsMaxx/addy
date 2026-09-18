@@ -73,8 +73,11 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.Log.Info("account created", "account", req.Account)
-	w.WriteHeader(http.StatusCreated)
-	s.ok(w, map[string]string{"account": req.Account})
+	// okStatus, not WriteHeader-then-ok: `ok` writes its own header now, so
+	// the two together produced a superfluous second write that Go logs and
+	// nobody reads. Caught because the log line appeared next to an unrelated
+	// test's output.
+	s.okStatus(w, http.StatusCreated, map[string]string{"account": req.Account})
 }
 
 type rosterResponse struct {

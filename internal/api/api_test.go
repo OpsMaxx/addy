@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -291,4 +293,49 @@ func mustDevice(t *testing.T) *protocol.DeviceKeys {
 		t.Fatal(err)
 	}
 	return d
+}
+
+// No handler writes a response header twice.
+//
+// Go logs "superfluous response.WriteHeader call" and carries on, so the
+// symptom is a line in a log nobody reads and a status code that is not the
+// one the handler meant. It appeared the moment `ok` started writing its own
+// header -- `createAccount` was doing `WriteHeader(201)` and then calling
+// `ok`, so the 201 stood and the 200 was dropped, silently, in the one
+// direction where a client might reasonably branch on the code.
+//
+// A source check rather than a runtime one: the runtime version would have to
+// exercise every handler, and the shape is what is wrong.
+func TestNoHandlerWritesAHeaderTwice(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(src), "\n")
+		for i := 0; i+1 < len(lines); i++ {
+			if !strings.Contains(lines[i], "w.WriteHeader(") {
+				continue
+			}
+			// The next non-blank, non-comment line.
+			for j := i + 1; j < len(lines) && j < i+4; j++ {
+				next := strings.TrimSpace(lines[j])
+				if next == "" || strings.HasPrefix(next, "//") {
+					continue
+				}
+				if strings.HasPrefix(next, "s.ok(") || strings.HasPrefix(next, "s.okStatus(") {
+					t.Errorf("%s:%d writes a header and then calls %s; use okStatus instead",
+						e.Name(), i+1, strings.SplitN(next, "(", 2)[0])
+				}
+				break
+			}
+		}
+	}
 }
