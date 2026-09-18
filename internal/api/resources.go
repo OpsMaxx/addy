@@ -169,6 +169,15 @@ func (s *Server) putObject(w http.ResponseWriter, r *http.Request, a authedReque
 		s.fail(w, statusFor(err), err)
 		return
 	}
+	// The notification carries the ACTOR, so the writing device drops its own
+	// echo without any bookkeeping on either side.
+	s.notify.publish(a.Account, Notification{
+		Collection: r.PathValue("name"),
+		Epoch:      req.Epoch,
+		Revision:   req.Counter,
+		Actor:      hex.EncodeToString(a.Device),
+	})
+
 	w.Header().Set("ETag", etag)
 	w.WriteHeader(http.StatusNoContent)
 }

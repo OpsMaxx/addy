@@ -414,3 +414,80 @@ func (c *Client) CapturedRequestForTest(method, path string) (*http.Request, err
 	req.Header.Set("X-Addy-Signature", hex.EncodeToString(sig))
 	return req, nil
 }
+
+// Notification mirrors the server's change pointer.
+type Notification struct {
+	Collection string `json:"collection"`
+	Epoch      uint64 `json:"epoch"`
+	Revision   uint64 `json:"revision"`
+	Actor      string `json:"actor"`
+	Resync     bool   `json:"resync,omitempty"`
+}
+
+// PutObject writes a sealed object.
+func (c *Client) PutObject(name string, epoch, counter uint64, body []byte, ifMatch string) (string, error) {
+	nonce, err := protocol.Nonce()
+	if err != nil {
+		return "", err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"epoch": epoch, "counter": counter,
+		"body": base64.StdEncoding.EncodeToString(body),
+	})
+	authz := protocol.Authz{
+		AccountID: c.Account, DeviceNonce: nonce,
+		Method: http.MethodPut, Path: "/v1/obj/" + name,
+		BodyHash: protocol.HashBody(payload),
+	}
+	sig, err := protocol.Sign(c.Device.Sign, authz)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPut, c.BaseURL+"/v1/obj/"+name, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Addy-Nonce", hex.EncodeToString(nonce))
+	req.Header.Set("X-Addy-Signature", hex.EncodeToString(sig))
+	req.Header.Set("Content-Type", "application/json")
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return "", fmt.Errorf("client: writing %s: %s: %s", name, resp.Status, readErr(resp.Body))
+	}
+	return resp.Header.Get("ETag"), nil
+}
+
+// Changes waits for change pointers.
+//
+// The server already drops this device's own writes, so what comes back is
+// other devices' changes. A nil slice means nothing arrived, which is not a
+// failure -- a client that treats a quiet account as an error backs off from a
+// working one.
+func (c *Client) Changes() ([]Notification, error) {
+	resp, err := c.do(http.MethodGet, "/v1/changes", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("client: waiting for changes: %s: %s", resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		Notifications []Notification `json:"notifications"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Notifications, nil
+}

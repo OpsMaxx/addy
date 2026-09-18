@@ -29,8 +29,9 @@ type Server struct {
 	// somebody deletes.
 	PollWait time.Duration
 
-	auth *authState
-	hub  *hub
+	auth   *authState
+	hub    *hub
+	notify *notifier
 }
 
 // New builds the API's handler.
@@ -38,7 +39,10 @@ func New(db *store.DB, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{DB: db, Log: log, PollWait: defaultPollWait, auth: newAuthState(), hub: newHub()}
+	return &Server{
+		DB: db, Log: log, PollWait: defaultPollWait,
+		auth: newAuthState(), hub: newHub(), notify: newNotifier(),
+	}
 }
 
 // Handler returns the routes.
@@ -66,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/obj/{name}", s.authed(s.getObject))
 	mux.Handle("PUT /v1/obj/{name}", s.authed(s.putObject))
 	mux.Handle("GET /v1/signal", s.authed(s.signal))
+	mux.Handle("GET /v1/changes", s.authed(s.changes))
 
 	return mux
 }

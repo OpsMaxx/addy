@@ -275,3 +275,12 @@ func cloneRequest(t *testing.T, r *http.Request) *http.Request {
 	out.Body = io.NopCloser(bytes.NewReader(nil))
 	return out
 }
+
+func mustDevice(t *testing.T) *protocol.DeviceKeys {
+	t.Helper()
+	d, err := protocol.NewDeviceKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
