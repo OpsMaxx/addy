@@ -107,6 +107,13 @@ func serve(args []string) error {
 	fs.StringVar(&cfg.Email, "email", "", "Contact address for the ACME account, so the CA can warn you before a renewal fails")
 	fs.StringVar(&cfg.Domain, "domain", "", "The hostname this instance answers on. Seeds the routing table on a fresh install")
 	fs.BoolVar(&cfg.UI, "ui", false, "Serve the web portal")
+	fs.StringVar(&cfg.TurnPublicIP, "turn-public-ip", "",
+		"Public IP to advertise for the embedded TURN relay. Without it no relay runs: TURN puts this address in the protocol and cannot infer it behind NAT")
+	fs.IntVar(&cfg.TurnPort, "turn-port", 0, "UDP port for the embedded TURN relay (default 3478)")
+	fs.StringVar(&cfg.TurnSecret, "turn-secret", "",
+		"Long-term secret TURN credentials are derived from. Generated and stored on first run if unset")
+	fs.StringVar(&cfg.TurnExternal, "turn", "",
+		"Use an external TURN server instead of the embedded one, as turn:host:port. Devices are told to use it and this box relays nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -121,6 +128,9 @@ func serve(args []string) error {
 	envDefault(&cfg.DataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
 	envDefault(&cfg.Domain, "ADDY_DOMAIN", "")
 	envDefault(&cfg.Email, "ADDY_ACME_EMAIL", "")
+	envDefault(&cfg.TurnPublicIP, "ADDY_TURN_PUBLIC_IP", "")
+	envDefault(&cfg.TurnSecret, "ADDY_TURN_SECRET", "")
+	envDefault(&cfg.TurnExternal, "ADDY_TURN_EXTERNAL", "")
 
 	cfg.Version = Version
 	cfg.BuildSha = BuildSha

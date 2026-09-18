@@ -29,6 +29,14 @@ type Server struct {
 	// somebody deletes.
 	PollWait time.Duration
 
+	// Turn mints relay credentials, when this instance runs a relay. Nil when
+	// it does not, which is a supported configuration and not an error.
+	Turn TurnMinter
+	// TurnExternal points devices at somebody else's relay instead. Takes
+	// precedence over Turn: an operator who configured both meant the external
+	// one, since configuring it is the deliberate act.
+	TurnExternal string
+
 	auth   *authState
 	hub    *hub
 	notify *notifier
@@ -90,6 +98,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/mail", s.authed(s.leaveMail))
 	mux.Handle("GET /v1/mail", s.authed(s.collectMail))
 	mux.Handle("POST /v1/mail/ack", s.authed(s.ackMail))
+
+	// How to relay, if at all. Authenticated, because a credential is a licence
+	// to use the operator's bandwidth.
+	mux.Handle("GET /v1/turn", s.authed(s.turn))
 
 	return mux
 }

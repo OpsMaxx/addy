@@ -3,6 +3,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +16,7 @@ import (
 	"github.com/opsmaxx/addy/internal/api"
 	"github.com/opsmaxx/addy/internal/frontdoor"
 	"github.com/opsmaxx/addy/internal/portal"
+	"github.com/opsmaxx/addy/internal/relay"
 	"github.com/opsmaxx/addy/internal/store"
 )
 
@@ -28,6 +31,21 @@ type Config struct {
 	Domain   string
 	Version  string
 	BuildSha string
+
+	// TURN. Off unless a public IP is given, because a relay that guesses its
+	// own address allocates addresses nobody can reach and fails only under
+	// the NAT conditions it exists for.
+	//
+	// `TurnExternal` points devices at somebody else's relay (coturn, or a
+	// hosted one) instead of running one here. Worth having as a first-class
+	// option rather than a deployment note: an embedded relay sees the timing
+	// and size of every packet two devices exchange, and an operator who would
+	// rather that were a different box's problem should not have to fork the
+	// server to arrange it.
+	TurnPublicIP string
+	TurnPort     int
+	TurnSecret   string
+	TurnExternal string
 }
 
 // DefaultDataDir is resolved at first use rather than being a constant, because
@@ -144,7 +162,38 @@ func Run(ctx context.Context, cfg Config) error {
 	// attacking, so an operator who does not want one should not be running
 	// one. Turning the portal off does not turn addy off.
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", api.New(db, log).Handler())
+	apiServer := api.New(db, log)
+
+	// The relay. Off unless an operator gave it a public address, and skipped
+	// entirely when they pointed devices at somebody else's -- an embedded
+	// relay sees the timing and size of every packet two devices exchange, so
+	// "not on this box" is a legitimate answer and not a degraded one.
+	if cfg.TurnExternal != "" {
+		apiServer.TurnExternal = cfg.TurnExternal
+		log.Info("relay: using an external TURN server", "url", cfg.TurnExternal)
+	} else if cfg.TurnPublicIP != "" {
+		secret, err := turnSecret(ctx, db, cfg.TurnSecret)
+		if err != nil {
+			return fmt.Errorf("relay secret: %w", err)
+		}
+		r, err := relay.Start(relay.Config{
+			PublicIP: cfg.TurnPublicIP,
+			Realm:    cfg.Domain,
+			Port:     cfg.TurnPort,
+			Secret:   secret,
+			Log:      log,
+		})
+		if err != nil {
+			return fmt.Errorf("starting the relay: %w", err)
+		}
+		defer r.Close()
+		apiServer.Turn = minter{r}
+	} else {
+		log.Info("relay: none configured; devices on networks that need one will not connect",
+			"hint", "pass -turn-public-ip to run one, or -turn to use an external server")
+	}
+
+	mux.Handle("/v1/", apiServer.Handler())
 
 	var pages http.Handler = http.NotFoundHandler()
 	if cfg.UI {
@@ -241,4 +290,43 @@ func loadRoutes(ctx context.Context, db *store.DB, cfg Config) (*frontdoor.Table
 		}
 	}
 	return routes, nil
+}
+
+// minter adapts the relay to the API's interface, which is deliberately
+// `any`-shaped so that internal/api does not import a TURN implementation to
+// describe one.
+type minter struct{ r *relay.Server }
+
+func (m minter) Mint(device string) any { return m.r.Mint(device) }
+
+// turnSecret returns the long-term key TURN credentials are derived from,
+// generating and storing one on first run.
+//
+// Stored rather than regenerated per start, because every credential already
+// issued would otherwise stop verifying on restart -- which would mean an
+// ordinary upgrade silently breaking relaying for every device mid-connection,
+// intermittently, in a way nobody would connect to the upgrade.
+//
+// `addy panic` clears it along with everything else, which is the one time
+// invalidating every outstanding credential is the point.
+func turnSecret(ctx context.Context, db *store.DB, configured string) (string, error) {
+	if configured != "" {
+		return configured, nil
+	}
+	existing, err := db.TurnSecret(ctx)
+	if err != nil {
+		return "", err
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	secret := hex.EncodeToString(raw)
+	if err := db.SetTurnSecret(ctx, secret); err != nil {
+		return "", err
+	}
+	return secret, nil
 }

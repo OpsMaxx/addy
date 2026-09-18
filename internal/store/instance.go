@@ -147,6 +147,15 @@ func (d *DB) Panic(ctx context.Context) (*PanicResult, error) {
 		}
 		out.InvitesRevoked, _ = res.RowsAffected()
 
+		// The TURN secret. Every credential already issued stops verifying,
+		// which is the point: a relay credential is a licence to use this
+		// box's bandwidth, and an attacker who took one keeps it until the
+		// secret it was derived from changes. A fresh one is generated on the
+		// next start.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM instance WHERE key = ?`, TurnSecretKey); err != nil {
+			return err
+		}
+
 		now := time.Now().UnixMilli()
 		for key, value := range map[string]string{
 			ReonboardKey:   time.UnixMilli(now).UTC().Format(time.RFC3339),
@@ -181,4 +190,21 @@ func itoa(n uint64) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// TurnSecretKey is the long-term key TURN credentials are derived from.
+//
+// In the instance table rather than a file, so that `addy panic` clears it
+// with one statement alongside everything else -- a secret in a file is a
+// secret somebody has to remember to delete, and panic is exactly the moment
+// nobody is going to.
+const TurnSecretKey = "turn_secret"
+
+func (d *DB) TurnSecret(ctx context.Context) (string, error) {
+	v, _, err := d.instanceValue(ctx, TurnSecretKey)
+	return v, err
+}
+
+func (d *DB) SetTurnSecret(ctx context.Context, secret string) error {
+	return d.setInstanceValue(ctx, TurnSecretKey, secret)
 }

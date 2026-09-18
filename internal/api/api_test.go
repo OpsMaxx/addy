@@ -18,6 +18,14 @@ import (
 )
 
 func instance(t *testing.T) (*httptest.Server, *store.DB) {
+	srv, db, _ := instanceWithAPI(t)
+	return srv, db
+}
+
+// instanceWithAPI also hands back the *api.Server, for the tests that need to
+// configure it -- relaying, chiefly, where the interesting cases are the three
+// operator configurations rather than anything a request can reach.
+func instanceWithAPI(t *testing.T) (*httptest.Server, *store.DB, *api.Server) {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "addy.db"))
 	if err != nil {
@@ -36,7 +44,7 @@ func instance(t *testing.T) (*httptest.Server, *store.DB) {
 	a.PollWait = 250 * time.Millisecond
 	srv := httptest.NewTLSServer(a.Handler())
 	t.Cleanup(srv.Close)
-	return srv, db
+	return srv, db, a
 }
 
 func invite(t *testing.T, db *store.DB) string {
