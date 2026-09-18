@@ -28,13 +28,19 @@ type builder struct {
 	epoch   uint64
 }
 
-func newBuilder(t *testing.T) *builder {
+func newBuilder(t *testing.T) *builder { return newBuilderSeeded(t, 0x11) }
+
+// newBuilderSeeded gives a DIFFERENT account. A fixed seed is right for a test
+// that wants determinism and wrong for one comparing two accounts -- the first
+// version of the card test built "two accounts" from one seed and was asserting
+// nothing.
+func newBuilderSeeded(t *testing.T, seed byte) *builder {
 	t.Helper()
-	root, err := DeriveRoot(bytes.Repeat([]byte{0x11}, 64))
+	root, err := DeriveRoot(bytes.Repeat([]byte{seed}, 64))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ak1, err := DeriveEpoch(bytes.Repeat([]byte{0x21}, 32), root.AccountID, 1)
+	ak1, err := DeriveEpoch(bytes.Repeat([]byte{seed ^ 0x30}, 32), root.AccountID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
