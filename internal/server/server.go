@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/opsmaxx/addy/internal/api"
 	"github.com/opsmaxx/addy/internal/frontdoor"
@@ -148,8 +149,10 @@ func Run(ctx context.Context, cfg Config) error {
 	// production sixty days after an install.
 	export := frontdoor.NewExporter(nil)
 
+	acmeStatus := &frontdoor.ACMEStatus{}
 	tlsConf, challenge, magic, err := frontdoor.NewACME(frontdoor.ACMEConfig{
 		CA:      cfg.ACMECA,
+		Status:  acmeStatus,
 		Dev:     cfg.Dev,
 		Email:   cfg.Email,
 		DataDir: cfg.DataDir,
@@ -263,6 +266,32 @@ func Run(ctx context.Context, cfg Config) error {
 		HTTPAddr:         cfg.resolvedHTTPAddr(),
 		Log:              log,
 	}
+
+	// Says WHY TLS is not working, on a timer, in words an operator can act on.
+	//
+	// Not once at startup: issuance can be fine for a month and then fail, and
+	// the moment it does is the moment somebody is looking at the log. Not on
+	// every failure either -- certmagic retries on its own schedule and a line
+	// per attempt is the noise that buried the cause in the first place. Once
+	// a minute while there is something wrong, and silence when there is not.
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		var said string
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				report := acmeStatus.Report()
+				if report == "" || report == said {
+					continue
+				}
+				said = report
+				log.Warn("TLS is not being served yet\n" + report)
+			}
+		}
+	}()
 
 	log.Info("addy starting",
 		"version", cfg.Version,

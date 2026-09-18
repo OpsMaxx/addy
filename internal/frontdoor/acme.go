@@ -25,6 +25,8 @@ type ACMEConfig struct {
 	DataDir string
 	Routes  *Table
 	Export  *Exporter
+	// Status records why issuance failed, for the operator. Optional.
+	Status *ACMEStatus
 }
 
 // NewACME wires certmagic and returns the pieces the Door needs.
@@ -60,8 +62,25 @@ func NewACME(c ACMEConfig) (*tls.Config, func(http.Handler) http.Handler, *certm
 	}
 
 	certmagic.Default.Storage = &certmagic.FileStorage{Path: filepath.Join(c.DataDir, "certs")}
+	// The status recorder wraps whatever else is listening, so an operator can
+	// be told WHY TLS is not working rather than only that it is not. See
+	// acmestatus.go: the client-side symptom names no cause and reads like a
+	// broken TLS configuration.
+	var chained func(context.Context, string, map[string]any) error
 	if c.Export != nil {
-		certmagic.Default.OnEvent = c.Export.OnEvent
+		// The loader, wired HERE because this is where the storage exists. An
+		// exporter constructed before this had nothing to read from, and the
+		// first successful issuance dereferenced it.
+		storage := certmagic.Default.Storage
+		c.Export.SetLoader(func(ctx context.Context, key string) ([]byte, error) {
+			return storage.Load(ctx, key)
+		})
+		chained = c.Export.OnEvent
+	}
+	if c.Status != nil {
+		certmagic.Default.OnEvent = c.Status.Observe(chained)
+	} else if chained != nil {
+		certmagic.Default.OnEvent = chained
 	}
 
 	// The routing table IS the allowlist. A DecisionFunc that returns nil

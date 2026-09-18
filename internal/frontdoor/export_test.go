@@ -207,3 +207,65 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// THE CRASH THIS FILE'S OTHER TESTS ALL MISSED.
+//
+// Production built the exporter as `NewExporter(nil)` -- the storage it reads
+// from is created by NewACME, which needs the exporter passed to it, so there
+// was nothing to hand over at construction. The first time a certificate was
+// ever obtained, `e.load(ctx, certKey)` dereferenced that nil and SIGSEGV'd
+// the whole relay: a box that had been running fine for an hour died at the
+// exact moment everything started working.
+//
+// Every test here passed throughout, because every one of them built an
+// Exporter WITH a loader. This one builds it the way production did.
+func TestANilLoaderDegradesRatherThanCrashing(t *testing.T) {
+	e := NewExporter(nil, Consumer{Name: "turn", Hosts: []string{"relay.example"}, Group: -1})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if p := recover(); p != nil {
+				t.Errorf("a nil loader panicked: %v", p)
+			}
+		}()
+		e.exportFromStorage(context.Background(), "relay.example", "cert", "key")
+	}()
+	<-done
+
+	// Named, not silent. The certificate is served either way; what is lost is
+	// the copy on disk that TURN and frps read, and an operator has to be able
+	// to find out.
+	status := e.Degraded()
+	if len(status) == 0 {
+		t.Fatal("a nil loader reported nothing at all")
+	}
+	var found bool
+	for _, why := range status {
+		if strings.Contains(why, "storage") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the degraded reason does not name the cause: %v", status)
+	}
+}
+
+// SetLoader is what NewACME uses to close the ordering gap. It must not
+// overwrite a loader a caller supplied deliberately.
+func TestSetLoaderDoesNotOverwriteOne(t *testing.T) {
+	calls := 0
+	e := NewExporter(func(context.Context, string) ([]byte, error) {
+		calls++
+		return []byte("original"), nil
+	})
+	e.SetLoader(func(context.Context, string) ([]byte, error) {
+		t.Error("SetLoader replaced a loader that was already there")
+		return nil, nil
+	})
+	_, _ = e.load(context.Background(), "x")
+	if calls != 1 {
+		t.Fatalf("the original loader ran %d times", calls)
+	}
+}

@@ -44,6 +44,21 @@ type Exporter struct {
 	load      func(ctx context.Context, key string) ([]byte, error)
 }
 
+// SetLoader supplies the storage reader after construction.
+//
+// It exists because of an ordering problem that produced the nil above: the
+// exporter has to be passed to NewACME, and the storage it reads from is
+// created BY NewACME. Rather than leaving a caller to remember, NewACME calls
+// this itself -- so an exporter built with nil is wired by the time any event
+// can reach it.
+func (e *Exporter) SetLoader(load func(ctx context.Context, key string) ([]byte, error)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.load == nil {
+		e.load = load
+	}
+}
+
 func NewExporter(load func(ctx context.Context, key string) ([]byte, error), consumers ...Consumer) *Exporter {
 	return &Exporter{
 		consumers: consumers,
@@ -87,6 +102,18 @@ func (e *Exporter) OnEvent(ctx context.Context, event string, data map[string]an
 // "_path" suffix on the key names. Reading them back through storage is also
 // what keeps this working unchanged if storage ever moves off local disk.
 func (e *Exporter) exportFromStorage(ctx context.Context, name, certKey, keyKey string) {
+	// A nil loader is a wiring mistake, and it used to be a SIGSEGV that took
+	// the whole relay down the first time a certificate was ever obtained --
+	// on a box that had been running fine for an hour, at the exact moment
+	// everything started working. Degraded and named instead: the certificate
+	// is served either way, and what is lost is the copy on disk that TURN and
+	// frps read.
+	if e.load == nil {
+		e.markAll(fmt.Sprintf(
+			"no certificate storage was wired into the exporter, so %s could not be copied out to the services that need it as files", name))
+		return
+	}
+
 	certPEM, err := e.load(ctx, certKey)
 	if err != nil {
 		e.markAll(fmt.Sprintf("loading certificate for %s: %v", name, err))
