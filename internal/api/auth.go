@@ -308,6 +308,31 @@ func (s *Server) authed(next authedHandler) http.Handler {
 			return
 		}
 
+		// Last, after the signature and the nonce: an instance in
+		// reonboard-required state still refuses forged requests as forgeries
+		// rather than blaming the panic, so a log from a box somebody just
+		// panicked still says which of the two happened.
+		//
+		// Checked per request against the database rather than cached at
+		// startup. `addy panic` is a separate process writing to the same
+		// file, and a cached flag would mean a running server kept serving
+		// until someone remembered to restart it -- which is precisely the
+		// moment nobody is thinking about restarts.
+		if blocked, at, err := s.DB.Reonboard(r.Context()); err != nil {
+			s.fail(w, http.StatusInternalServerError, err)
+			return
+		} else if blocked {
+			// 503, not 401: nothing is wrong with this device's credentials
+			// and a client that treated it as an auth failure would re-login
+			// in a loop. `Retry-After` is deliberately absent -- there is no
+			// time at which this clears by itself.
+			w.Header().Set("X-Addy-Reonboard", at.UTC().Format(time.RFC3339))
+			s.fail(w, http.StatusServiceUnavailable, fmt.Errorf(
+				"this instance was reset or panicked at %s and is not serving until an operator has re-checked its devices",
+				at.UTC().Format(time.RFC3339)))
+			return
+		}
+
 		next(w, r, authedRequest{Account: sess.account, Device: sess.device, Body: body})
 	})
 }

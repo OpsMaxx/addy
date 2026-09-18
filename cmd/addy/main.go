@@ -38,6 +38,9 @@ Commands:
   preflight   Check this box can actually obtain a certificate, before installing
   selftest    Prove a running instance actually works end to end
   join        Print the addy:// string a device uses to add this instance
+  panic       Rotate every secret this box holds and stop serving devices
+  reonboard   Show or clear the reonboard-required flag panic and reset set
+  reset       Delete every account on this box (--hard), after showing what goes
   version     Print version information
 
 Run "addy <command> -h" for the flags a command takes.
@@ -60,6 +63,12 @@ func main() {
 		err = preflight(args)
 	case "join":
 		err = join(args)
+	case "panic":
+		err = panicCmd(args)
+	case "reonboard":
+		err = reonboard(args)
+	case "reset":
+		err = reset(args)
 	case "version", "--version", "-version":
 		printVersion()
 		return
@@ -183,4 +192,48 @@ func envDefault(target *string, key, fallback string) {
 		return
 	}
 	*target = fallback
+}
+
+// panicCmd is `panic`. Named with the suffix because `panic` is a builtin and
+// a function shadowing it in this file would be a trap for the next person to
+// add error handling here.
+func panicCmd(args []string) error {
+	fs := flag.NewFlagSet("panic", flag.ExitOnError)
+	dataDir := fs.String("data", "", "Data directory (default: "+server.DefaultDataDir+")")
+	keepCerts := fs.Bool("keep-certs", false,
+		"Do not delete the ACME account key and certificates. Only when the compromise cannot have touched them")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	envDefault(dataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
+	return server.Panic(context.Background(), server.PanicOptions{
+		DataDir: *dataDir, KeepCerts: *keepCerts,
+	})
+}
+
+func reonboard(args []string) error {
+	fs := flag.NewFlagSet("reonboard", flag.ExitOnError)
+	dataDir := fs.String("data", "", "Data directory (default: "+server.DefaultDataDir+")")
+	clear := fs.Bool("clear", false, "Clear the flag and serve devices again")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	envDefault(dataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
+	return server.Reonboard(context.Background(), server.ReonboardOptions{
+		DataDir: *dataDir, Clear: *clear,
+	})
+}
+
+func reset(args []string) error {
+	fs := flag.NewFlagSet("reset", flag.ExitOnError)
+	dataDir := fs.String("data", "", "Data directory (default: "+server.DefaultDataDir+")")
+	hard := fs.Bool("hard", false, "Actually delete. Without it, reset only says what would go")
+	yes := fs.Bool("yes", false, "Skip the confirmation. For installers and tests, not for people")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	envDefault(dataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
+	return server.Reset(context.Background(), server.ResetOptions{
+		DataDir: *dataDir, Hard: *hard, Yes: *yes,
+	})
 }
