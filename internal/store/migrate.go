@@ -102,6 +102,27 @@ var migrations = []string{
 		PRIMARY KEY (account_id, name, epoch)
 	)`,
 
+	// 4. Conflict copies.
+	//
+	// Concurrency is last-writer-wins per collection, WITH THE LOSER KEPT. A
+	// bare LWW quietly destroys one device's work and tells nobody; keeping the
+	// loser as a separately named object turns that into a choice a person
+	// makes. Garage has no object versioning, so the copy has to be a real
+	// object -- which is also why it needs its own garbage collection, since
+	// nothing reclaims it otherwise.
+	`CREATE TABLE conflicts (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+		name       TEXT NOT NULL,
+		epoch      INTEGER NOT NULL,
+		counter    INTEGER NOT NULL,
+		body       BLOB NOT NULL,
+		-- The device that wrote the LOSING copy, so the chooser can say which
+		-- machine it came from rather than offering two anonymous blobs.
+		device     BLOB NOT NULL,
+		created_at INTEGER NOT NULL
+	)`,
+
 	// Invites. THE INVITE ROW IS THE AUTHORIZATION: an invitation record is
 	// itself permission to register, bypassing "signups disabled" entirely.
 	// That means an instance with no mail server, or an air-gapped one, can
