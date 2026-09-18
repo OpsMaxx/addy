@@ -202,6 +202,19 @@ func (c *Client) Login() error {
 // method, path and body, so an authorization for a GET cannot be replayed as
 // the DELETE the server would rather have had.
 func (c *Client) do(method, path string, payload any) (*http.Response, error) {
+	// Before anything is marshalled or signed. A client used out of order --
+	// GetObject before Login, most plausibly in a retry path that lost its
+	// session -- otherwise dereferences a nil device key and panics, which in
+	// a sidecar takes the process down and, through the parent's parser,
+	// whatever else was in flight on the same pipe. An error is what the
+	// caller can act on.
+	if c.Device == nil {
+		return nil, errors.New("client: no device key; register or restore an account first")
+	}
+	if c.token == "" {
+		return nil, errors.New("client: not logged in")
+	}
+
 	var body []byte
 	if payload != nil {
 		var err error
@@ -463,6 +476,45 @@ func (c *Client) PutObject(name string, epoch, counter uint64, body []byte, ifMa
 		return "", fmt.Errorf("client: writing %s: %s: %s", name, resp.Status, readErr(resp.Body))
 	}
 	return resp.Header.Get("ETag"), nil
+}
+
+// StoredObject is one sealed object as the server returned it. The body is
+// still sealed: the client decides what it is, and this layer never does.
+type StoredObject struct {
+	Body    []byte
+	Counter uint64
+	ETag    string
+}
+
+// GetObject reads one sealed object back.
+//
+// The name and epoch are all the caller supplies. WHICH ACCOUNT is not a
+// parameter here and is not one on the wire either -- the server takes it from
+// the session. That is the only reason two accounts cannot read each other's
+// objects, and internal/api/isolation_test.go is where it is proved rather
+// than assumed.
+func (c *Client) GetObject(name string, epoch uint64) (*StoredObject, error) {
+	resp, err := c.do(http.MethodGet, fmt.Sprintf("/v1/obj/%s?epoch=%d", name, epoch), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("client: reading %s: %s: %s", name, resp.Status, readErr(resp.Body))
+	}
+	var out struct {
+		Body    string `json:"body"`
+		Counter uint64 `json:"counter"`
+		ETag    string `json:"etag"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	body, err := base64.StdEncoding.DecodeString(out.Body)
+	if err != nil {
+		return nil, fmt.Errorf("client: %s came back with a body that is not base64", name)
+	}
+	return &StoredObject{Body: body, Counter: out.Counter, ETag: out.ETag}, nil
 }
 
 // Changes waits for change pointers.
