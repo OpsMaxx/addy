@@ -32,6 +32,13 @@ type Server struct {
 	// Turn mints relay credentials, when this instance runs a relay. Nil when
 	// it does not, which is a supported configuration and not an error.
 	Turn TurnMinter
+	// Overlay mints headscale pre-auth keys. Nil when no overlay is
+	// configured, which is the default.
+	Overlay OverlayMinter
+	// OverlayControlURL is what a joining client points at. Returned with the
+	// key, because a key without it is half an answer and the two have to
+	// agree.
+	OverlayControlURL string
 	// TurnExternal points devices at somebody else's relay instead. Takes
 	// precedence over Turn: an operator who configured both meant the external
 	// one, since configuring it is the deliberate act.
@@ -109,6 +116,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/obj/{name}/conflict", s.authed(s.keepConflict))
 	mux.Handle("GET /v1/conflicts", s.authed(s.listConflicts))
 	mux.Handle("POST /v1/conflicts/{id}/resolve", s.authed(s.resolveConflict))
+
+	// The overlay join. A device on the roster is a device on the overlay, and
+	// the authentication that gets it here is what makes that true.
+	mux.Handle("POST /v1/overlay/join", s.authed(s.overlayJoin))
 
 	return mux
 }

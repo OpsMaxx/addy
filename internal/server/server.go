@@ -16,6 +16,7 @@ import (
 
 	"github.com/opsmaxx/addy/internal/api"
 	"github.com/opsmaxx/addy/internal/frontdoor"
+	"github.com/opsmaxx/addy/internal/overlay"
 	"github.com/opsmaxx/addy/internal/portal"
 	"github.com/opsmaxx/addy/internal/relay"
 	"github.com/opsmaxx/addy/internal/store"
@@ -47,6 +48,13 @@ type Config struct {
 	TurnPort     int
 	TurnSecret   string
 	TurnExternal string
+
+	// The overlay control plane. Off unless HeadscaleURL is set; the API key
+	// is powerful -- it can create and delete nodes, users and keys across the
+	// whole coordination server -- which is why nothing here has a default.
+	HeadscaleURL    string
+	HeadscaleAPIKey string
+	HeadscaleUser   string
 }
 
 // DefaultDataDir is resolved at first use rather than being a constant, because
@@ -192,6 +200,25 @@ func Run(ctx context.Context, cfg Config) error {
 	} else {
 		log.Info("relay: none configured; devices on networks that need one will not connect",
 			"hint", "pass -turn-public-ip to run one, or -turn to use an external server")
+	}
+
+	// The overlay. Off unless an operator pointed addy at a headscale, which
+	// the M5a wizard is what deploys.
+	if cfg.HeadscaleURL != "" {
+		m, err := overlay.New(overlay.Config{
+			BaseURL: cfg.HeadscaleURL,
+			APIKey:  cfg.HeadscaleAPIKey,
+			User:    cfg.HeadscaleUser,
+		})
+		if err != nil {
+			return fmt.Errorf("overlay: %w", err)
+		}
+		apiServer.Overlay = overlayAdapter{m}
+		// The control URL devices point at is addy's own hostname: headscale
+		// sits on loopback behind the front door, so its own base URL is
+		// unreachable from anywhere a device is.
+		apiServer.OverlayControlURL = "https://" + cfg.Domain
+		log.Info("overlay: devices can join through headscale", "control_url", apiServer.OverlayControlURL)
 	}
 
 	mux.Handle("/v1/", apiServer.Handler())
@@ -361,4 +388,13 @@ func metaHandler(cfg Config) http.Handler {
 			"build":   cfg.BuildSha,
 		})
 	})
+}
+
+// overlayAdapter widens the minter's typed result to the `any` the API takes,
+// for the same reason `minter` exists next to it: internal/api should not
+// import a package for a service most instances never configure.
+type overlayAdapter struct{ m *overlay.Minter }
+
+func (a overlayAdapter) Mint(ctx context.Context, device []byte, controlURL string) (any, error) {
+	return a.m.Mint(ctx, device, controlURL)
 }
