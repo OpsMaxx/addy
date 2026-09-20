@@ -333,20 +333,28 @@ func TestAnUnauthenticatedCallerReachesNothingButMe(t *testing.T) {
 	}
 }
 
-func TestTheSignupPolicyDecidesWhoGetsAnInvite(t *testing.T) {
-	// A relay is multi-user by design, and until there was a policy there was
-	// no honest default: open would mean every account at the provider getting
-	// space on somebody's private box, closed would mean the multi-user half
-	// of the product being unreachable. So it is a decision, and it is
-	// enforced HERE rather than by the page hiding a button — a hidden button
-	// is one anybody bypasses with a single fetch.
+func TestAnybodySignedInCanMintTheirOwnFirstInvite(t *testing.T) {
+	// SETTING UP YOUR OWN FIRST DEVICE NEEDS NOBODY'S PERMISSION.
+	//
+	// This used to depend on the signup policy, and the test that lived here
+	// asserted it did. That was the wrong rule: it made a person ask an
+	// operator, whose only way to help was to press the same button on the
+	// same page for them. The gate protected nothing, because whoever could
+	// sign in was already somebody this relay had decided to admit.
+	//
+	// What still holds somebody to one device group is the store, which
+	// refuses a second invite to a person who already has one — enforced where
+	// it cannot be bypassed rather than by a page hiding a button.
+	//
+	// The policy still decides something, and it is the earlier question: who
+	// may sign in at all. That is settled at the callback, before any of this.
 	for _, c := range []struct {
 		policy SignupPolicy
 		user   int // what an ordinary user gets from POST /admin/v1/my/invite
 		op     int // what the operator gets
 	}{
 		{SignupOpen, http.StatusOK, http.StatusOK},
-		{SignupInvite, http.StatusForbidden, http.StatusOK},
+		{SignupInvite, http.StatusOK, http.StatusOK},
 	} {
 		store := newStore()
 		owner := newIDP(t, "the-owner", "owner@example.com")
@@ -466,3 +474,88 @@ func (stubAdmin) Users(context.Context) ([]UserView, error)                 { re
 func (stubAdmin) SetQuota(context.Context, string, int64) error             { return nil }
 func (stubAdmin) DeleteAccount(context.Context, string) error               { return nil }
 func (stubAdmin) SetUserBlocked(context.Context, string, bool) error        { return nil }
+
+// The operator changes the sign-in policy from the console, and it takes
+// effect without a restart.
+//
+// THE ENVIRONMENT IS A DEFAULT, NOT AN OVERRIDE. An operator making this
+// choice in the console has decided at least as deliberately as whoever wrote
+// the unit file, and a restart quietly undoing it would be a trap. So the
+// stored value wins, and the console says which of the two is in force.
+func TestTheOperatorChangesTheSignupPolicyFromTheConsole(t *testing.T) {
+	store := newStore()
+	owner := newIDP(t, "the-owner", "owner@example.com")
+	a := New(Config{
+		Issuer: owner.server.URL, ClientID: "cid", ClientSecret: "s",
+		BaseURL: "https://relay.example", Signup: SignupOpen,
+	}, store)
+	a.http = owner.server.Client()
+
+	opSid, err := signIn(t, a)
+	if err != nil {
+		t.Fatalf("the operator could not sign in: %v", err)
+	}
+	mux := http.NewServeMux()
+	a.Routes(mux, stubAdmin{})
+
+	ask := func(method, path, sid string) (int, string) {
+		req := httptest.NewRequest(method, path, nil)
+		if method != http.MethodGet {
+			req.Header.Set("Origin", "https://relay.example")
+		}
+		if sid != "" {
+			req.AddCookie(&http.Cookie{Name: cookieName, Value: sid})
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+
+	// Before anything is stored, the environment is what is in force and the
+	// console says so.
+	code, body := ask(http.MethodGet, "/admin/v1/settings", opSid)
+	if code != http.StatusOK || !strings.Contains(body, `"signupSource":"environment"`) {
+		t.Fatalf("settings before any change: %d %s", code, body)
+	}
+	if a.SignupInForce(context.Background()) != SignupOpen {
+		t.Fatalf("in force before any change = %q, want open", a.SignupInForce(context.Background()))
+	}
+
+	if code, body = ask(http.MethodPost, "/admin/v1/settings?signup=closed", opSid); code != http.StatusOK {
+		t.Fatalf("setting the policy: %d %s", code, body)
+	}
+	// No restart, no re-read of config: the next question gets the new answer.
+	if got := a.SignupInForce(context.Background()); got != SignupClosed {
+		t.Fatalf("in force after the change = %q, want closed", got)
+	}
+	if code, body = ask(http.MethodGet, "/admin/v1/settings", opSid); !strings.Contains(body, `"signupSource":"console"`) {
+		t.Fatalf("settings after the change should say it came from the console: %d %s", code, body)
+	}
+
+	// A value that is not a policy is refused rather than stored and ignored
+	// later, which would leave the console showing one thing and the relay
+	// doing another.
+	if code, _ = ask(http.MethodPost, "/admin/v1/settings?signup=banana", opSid); code != http.StatusBadRequest {
+		t.Errorf("a nonsense policy answered %d, want 400", code)
+	}
+	if got := a.SignupInForce(context.Background()); got != SignupClosed {
+		t.Errorf("a refused write changed the policy to %q", got)
+	}
+
+	// A MEMBER CANNOT REACH IT AT ALL. Changing who may sign in is the
+	// operator's decision, and a member who could make it could open the relay
+	// to everybody.
+	memberSid := "a-members-session"
+	a.mu.Lock()
+	a.sessions[key(memberSid)] = session{subject: "somebody-else", userID: "u2", expires: a.now().Add(time.Hour)}
+	a.mu.Unlock()
+	if code, _ = ask(http.MethodGet, "/admin/v1/settings", memberSid); code != http.StatusForbidden {
+		t.Errorf("a member reading settings got %d, want 403", code)
+	}
+	if code, _ = ask(http.MethodPost, "/admin/v1/settings?signup=open", memberSid); code != http.StatusForbidden {
+		t.Errorf("a member writing settings got %d, want 403", code)
+	}
+	if got := a.SignupInForce(context.Background()); got != SignupClosed {
+		t.Errorf("a member's refused write changed the policy to %q", got)
+	}
+}

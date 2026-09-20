@@ -204,7 +204,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		// button they could use — and portal.go states that /v1/meta is
 		// deliberately the only structured thing served without a session.
 		if ok {
-			body["signup"] = string(a.cfg.Signup)
+			body["signup"] = string(a.SignupInForce(r.Context()))
 		}
 		writeJSON(w, body)
 	})
@@ -221,13 +221,21 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	}))
 
 	mux.Handle("POST /admin/v1/my/invite", a.signedIn(func(w http.ResponseWriter, r *http.Request, who Signed) {
-		// THE POLICY IS ENFORCED HERE, not in the page. A page that hid the
-		// button would be a page somebody could bypass with one fetch.
-		if !who.Operator && a.cfg.Signup != SignupOpen {
-			problem(w, http.StatusForbidden, errors.New(
-				"this relay does not hand out invites; ask whoever runs it for one"))
-			return
-		}
+		// A SIGNED-IN PERSON MINTS THEIR OWN FIRST DEVICE'S INVITE, ALWAYS.
+		//
+		// This used to depend on the signup policy, which made setting up your
+		// own first device a thing you had to ask an operator for — and the
+		// operator's answer was to press the same button on the same page. The
+		// gate protected nothing: whoever could sign in was already somebody
+		// this relay had decided to admit.
+		//
+		// What still holds it to one device-group per person is the store,
+		// which refuses a second invite to somebody who already has one. That
+		// is the rule worth enforcing, and it is enforced where it cannot be
+		// bypassed.
+		//
+		// Whether somebody may sign in AT ALL is the policy's job now, and it
+		// is decided before any of this, at the callback.
 		token, err := admin.NewInviteFor(r.Context(), who.UserID, 24*time.Hour)
 		if err != nil {
 			fault(w, err)
@@ -237,6 +245,36 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	}))
 
 	// ---- the operator: the whole relay -------------------------------------
+
+	// ---- settings the operator can change without a restart ---------------
+	//
+	// ONLY SETTINGS THAT ARE SAFE TO GET WRONG FROM A BROWSER LIVE HERE. The
+	// identity provider's issuer, client id and client secret deliberately do
+	// not: the secret is a credential and has no business in a web form, and
+	// changing the issuer from inside a session that the issuer granted is how
+	// somebody locks themselves out of their own relay with one click. Those
+	// stay in the environment file, where changing them is a deliberate act on
+	// the box.
+	mux.Handle("GET /admin/v1/settings", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
+		inForce := a.SignupInForce(r.Context())
+		stored, _, err := a.store.InstanceValue(r.Context(), settingSignup)
+		writeJSON(w, map[string]any{
+			"signup": string(inForce),
+			// Where the value came from, because an operator looking at a
+			// setting needs to know whether the unit file still decides it.
+			"signupSource": map[bool]string{true: "console", false: "environment"}[err == nil && SignupPolicy(stored).valid()],
+			"envDefault":   string(a.cfg.Signup),
+		})
+	}))
+
+	mux.Handle("POST /admin/v1/settings", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
+		p := SignupPolicy(r.URL.Query().Get("signup"))
+		if err := a.SetSignup(r.Context(), p); err != nil {
+			problem(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, map[string]any{"signup": string(p), "signupSource": "console"})
+	}))
 
 	mux.Handle("GET /admin/v1/users", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		list, err := admin.Users(r.Context())

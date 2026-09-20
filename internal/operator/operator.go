@@ -124,6 +124,41 @@ const (
 	SignupClosed SignupPolicy = "closed"
 )
 
+// settingSignup is where an operator's choice is stored.
+//
+// The `setting:` prefix keeps anything the console can write clear of the rows
+// it must never write — `operator_identity` lives in this same table, and a
+// settings endpoint that could address it would be a settings endpoint that
+// could hand the relay to somebody else.
+const settingSignup = "setting:signup"
+
+// SignupInForce is the policy actually applied, which is the stored one if an
+// operator has set it and the configured one otherwise.
+//
+// THE ENVIRONMENT IS A DEFAULT, NOT AN OVERRIDE. An operator changing this in
+// the console is making a decision at least as considered as the one in the
+// unit file, and having the restart silently undo it would be a trap. Read per
+// request rather than cached, so a change takes effect immediately and without
+// a restart — the operator is on the page, and a setting that needs a restart
+// is a setting they cannot tell has applied.
+func (a *Auth) SignupInForce(ctx context.Context) SignupPolicy {
+	if v, _, err := a.store.InstanceValue(ctx, settingSignup); err == nil {
+		if p := SignupPolicy(v); p.valid() {
+			return p
+		}
+	}
+	return a.cfg.Signup
+}
+
+// SetSignup stores the policy. An invalid value is refused rather than stored
+// and silently ignored later.
+func (a *Auth) SetSignup(ctx context.Context, p SignupPolicy) error {
+	if !p.valid() {
+		return fmt.Errorf("operator: %q is not a sign-in policy", p)
+	}
+	return a.store.SetInstanceValue(ctx, settingSignup, string(p))
+}
+
 func (p SignupPolicy) valid() bool {
 	return p == SignupOpen || p == SignupInvite || p == SignupClosed
 }
@@ -383,7 +418,10 @@ func (a *Auth) Complete(ctx context.Context, state, code string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if !isOperator && a.cfg.Signup == SignupClosed {
+	// The policy IN FORCE, not the one in the unit file: an operator who has
+	// closed sign-ups from the console expects that to be true of the next
+	// person through the door, without a restart.
+	if !isOperator && a.SignupInForce(ctx) == SignupClosed {
 		// Said as a policy rather than as a failure: the person did nothing
 		// wrong, this relay is simply not taking sign-ins.
 		return "", errors.New("this relay is not open for sign-in; ask whoever runs it")

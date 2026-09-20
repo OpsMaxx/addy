@@ -21,12 +21,14 @@ async function loadUsers(me) {
   $('no-users').hidden = users.length > 1
   $('stat-people').textContent = String(users.length)
 
+  // Everybody here sets up their own devices; this line says who is on the
+  // list, not what they may do once they are. The card below changes it —
+  // pointing at a command-line flag was wrong even before it moved, because
+  // the person reading it is already holding the control.
   $('signup-note').textContent =
-    me.signup === 'open'
-      ? 'Anybody who can sign in to your provider can get an account here. Change it with -signup if that is wider than you meant.'
-      : me.signup === 'closed'
-        ? 'Nobody but you can sign in. Change it with -signup to let others.'
-        : 'People can sign in and see their own space; an invite still comes from you. Use -signup open to let them make their own.'
+    me.signup === 'closed'
+      ? 'Nobody new can sign in. The people below already have accounts and are unaffected.'
+      : 'Anybody who can sign in to your identity provider can get an account here. Each of them sets up their own devices without needing you.'
 
   for (const u of users) {
     const tr = document.createElement('tr')
@@ -182,6 +184,47 @@ async function refreshAll(me) {
   await loadAccounts(me)
 }
 
+/**
+ * Who may sign in, changed from here rather than from the unit file.
+ *
+ * THIS IS THE ONLY THING IT DECIDES NOW. Everybody signed in sets up their own
+ * devices and mints their own invite; that needs nothing from the operator, so
+ * the policy governs the earlier question — who gets through the door at all.
+ *
+ * The buttons say which one is in force rather than being a pair of equal
+ * options, because an operator arriving here needs to read the current state
+ * before they need to change it.
+ */
+async function wireSignup() {
+  const paint = (s) => {
+    const open = s.signup !== 'closed'
+    $('signup-state').textContent = open
+      ? 'Anybody who can sign in to your identity provider can get an account on this relay.'
+      : 'Nobody new can sign in. People who already have an account here are unaffected.'
+    $('signup-open').disabled = open
+    $('signup-closed').disabled = !open
+    $('signup-source').textContent =
+      s.signupSource === 'console'
+        ? 'Set from this page. It overrides ADDY_SIGNUP in the environment, which says ' + s.envDefault + '.'
+        : 'Taken from ADDY_SIGNUP in the environment. Changing it here overrides that, and survives a restart.'
+  }
+
+  const set = async (signup) => {
+    $('signup-saved').textContent = 'Saving…'
+    try {
+      paint(await api('/admin/v1/settings?signup=' + encodeURIComponent(signup), { method: 'POST' }))
+      $('signup-saved').textContent = 'Saved.'
+    } catch (err) {
+      $('signup-saved').textContent = ''
+      fail(err)
+    }
+  }
+
+  $('signup-open').addEventListener('click', () => set('open'))
+  $('signup-closed').addEventListener('click', () => set('closed'))
+  paint(await api('/admin/v1/settings'))
+}
+
 async function main() {
   const me = await boot()
   if (!me) return
@@ -205,6 +248,7 @@ async function main() {
   })
 
   await refreshAll(me).catch(fail)
+  await wireSignup().catch(fail)
 }
 
 void main()

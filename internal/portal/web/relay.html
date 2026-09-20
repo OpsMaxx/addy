@@ -114,6 +114,27 @@
         </div>
 
         <div class="card">
+          <div class="card-head"><h2>Who may sign in</h2></div>
+          <p class="fine" id="signup-state"></p>
+          <p class="flush">
+            <button id="signup-open" class="button ghost small">Anybody at your provider</button>
+            <button id="signup-closed" class="button ghost small">Only me</button>
+            <span id="signup-saved" class="fine"></span>
+          </p>
+          <p class="fine">
+            Everybody who signs in sets up their own devices and mints their own
+            invite — that needs nothing from you. This decides only who is let
+            through the door in the first place, and it takes effect at once
+            without restarting the relay.
+          </p>
+          <!-- The identity provider's issuer, client id and secret are not
+               here on purpose: a secret has no business in a web form, and
+               changing the issuer from inside a session that issuer granted is
+               how somebody locks themselves out with one click. -->
+          <p class="fine" id="signup-source"></p>
+        </div>
+
+        <div class="card">
           <div class="card-head"><h2>Invite somebody who has not signed in</h2></div>
           <p class="fine">
             An invite sets up one person's first device, and creates the sync group it syncs into. Somebody who signs in here can get

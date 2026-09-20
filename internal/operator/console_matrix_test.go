@@ -176,11 +176,14 @@ func TestEveryConsoleRouteForEveryCallerOnEveryPolicy(t *testing.T) {
 		},
 		{
 			method: http.MethodPost, path: "/admin/v1/my/invite",
-			anon: http.StatusUnauthorized, member: http.StatusForbidden,
+			anon: http.StatusUnauthorized, member: http.StatusOK,
 			memberIfOpen: http.StatusOK, operator: http.StatusOK,
-			why: "the ONLY cell where the policy decides, and it is decided here rather " +
-				"than by the page hiding a button — a hidden button is one anybody " +
-				"bypasses with a single fetch",
+			why: "SETTING UP YOUR OWN FIRST DEVICE NEEDS NOBODY'S PERMISSION. This used " +
+				"to depend on the signup policy, which meant asking an operator to press " +
+				"the same button on the same page; the gate protected nothing, because " +
+				"whoever could sign in was already somebody this relay had admitted. " +
+				"What still holds a person to one device group is the store, and the " +
+				"policy now decides only who may sign in at all",
 		},
 		{
 			method: http.MethodGet, path: "/admin/v1/users",
