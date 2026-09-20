@@ -1,8 +1,11 @@
 # What an addy admin can and cannot do
 
-Published **before** the admin UI exists, deliberately. Writing this boundary
+Published **before** the admin UI existed, deliberately. Writing this boundary
 down costs nothing and is most of what earns an operator's trust — and a
 boundary discovered from the UI is one nobody agreed to.
+
+The UI exists now, at `/admin`, and it was built to this document rather than
+the other way round. **`OPERATOR-SIGNIN.md` is how to turn it on.**
 
 ## The rule
 
