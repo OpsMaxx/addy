@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Your console · addy</title>
+    <link rel="stylesheet" href="/assets/portal.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <!-- The masthead is the one thing on every page in every state. It stays
+           when nobody is signed in, so a stranger who lands here sees a product
+           rather than an error. Everything to the right of it is removed, not
+           hidden, when there is nobody to name. -->
+      <header class="topbar">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">a</span>
+          <span class="brand-word">addy</span>
+        </a>
+        <div id="bar" class="row" hidden>
+          <p class="fine flush">
+            Signed in as <strong id="who"></strong><span id="role" class="chip"></span>
+          </p>
+          <button id="signout" class="button ghost small">Sign out</button>
+        </div>
+      </header>
+
+      <!-- THIS IS NOT AN ADMINISTRATION CONSOLE and does not describe itself as
+           one. Everything on it is the reader's own: their accounts, their
+           devices, their invite. Whoever also runs the relay gets a link at the
+           bottom to a separate page, and nothing else here changes for them. -->
+      <h1>Your console</h1>
+      <p class="lede">
+        What this relay holds for you. It carries your data between your devices
+        and cannot read any of it.
+      </p>
+
+      <section id="signed-out" hidden>
+        <p id="signed-out-note" class="notice" hidden></p>
+        <div class="card feature">
+          <div class="card-head"><h2>Sign in</h2></div>
+          <p class="fine">
+            Signing in lets you see the accounts and devices you have on this
+            relay. It gives no access to what is inside them — this server
+            holds no key, and there is none to give.
+          </p>
+          <p class="flush"><a class="button" href="/admin/login">Sign in</a></p>
+        </div>
+      </section>
+
+      <section id="unconfigured" hidden>
+        <div class="card">
+          <div class="card-head"><h2>No sign-in is configured</h2></div>
+          <p class="fine flush">
+            This relay has no identity provider set, so there is nothing to
+            sign in to. Whoever runs it administers it with the
+            <code>addy</code> command on the box.
+          </p>
+        </div>
+      </section>
+
+      <section id="mine" hidden>
+        <!-- The lead card, because for somebody with nothing this is the only
+             thing to do, and for everybody else it is still the only thing this
+             page can start. -->
+        <div class="card feature">
+          <div class="card-head"><h2>Start an account</h2></div>
+          <p class="fine" id="invite-blurb"></p>
+          <p id="mint-mine-row" class="flush">
+            <button id="mint-mine" class="button">Create an invite</button>
+            <span id="mint-mine-note" class="fine"></span>
+          </p>
+          <code id="invite-mine" class="token" hidden></code>
+          <p id="invite-mine-warn" class="fine flush" hidden>
+            Copy it now — it is shown once and this page cannot show it again.
+            Hand it over the way you would a password.
+          </p>
+        </div>
+
+        <!-- The three numbers this relay holds about you, and there are no
+             others. Given room rather than buried in a table, because the
+             shortness of this list is the product's point. -->
+        <section id="stats" hidden>
+          <div class="split">
+            <div class="stat">
+              <span class="stat-value" id="stat-accounts">0</span>
+              <span class="stat-label">Accounts</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" id="stat-devices">0</span>
+              <span class="stat-label">Devices</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" id="stat-stored">0</span>
+              <span class="stat-label">Sealed data</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="card">
+          <div class="card-head"><h2>Your accounts</h2></div>
+          <div id="my-accounts-shell" class="scroller" hidden>
+            <table class="listing static">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Devices</th>
+                  <th>Used</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody id="my-accounts"></tbody>
+            </table>
+          </div>
+          <div id="no-mine" class="empty" hidden>
+            <p><strong>Nothing here yet</strong></p>
+            <p class="fine flush" id="no-mine-text"></p>
+          </div>
+          <p class="fine">
+            <strong>Device names are not shown here, and cannot be.</strong>
+            Each device's name is encrypted under your account key before it
+            reaches this relay, which holds no key — so the server can count
+            your devices and cannot read what any of them is called. Open
+            <em>Sync &amp; devices</em> in OpsMaxx to see them by name, or to
+            remove one.
+          </p>
+        </div>
+
+        <!-- The only thing on this page that is about the relay rather than the
+             reader, and the only way to the operator view. A member never sees
+             it; an operator arrives there by choosing to. -->
+        <div id="operator-door" class="card" hidden>
+          <div class="card-head">
+            <h2>You run this relay</h2>
+            <a class="button ghost small" href="/console/relay">Operator console →</a>
+          </div>
+          <p class="fine flush">
+            Everybody's accounts, invites for people who have not signed in,
+            quotas and deletions are on their own page. Nothing there is needed
+            to use your own account.
+          </p>
+        </div>
+      </section>
+
+      <p id="problem" class="problem" role="alert" hidden></p>
+    </main>
+    <script type="module" src="/assets/console.js"></script>
+  </body>
+</html>

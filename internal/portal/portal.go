@@ -61,31 +61,35 @@ func Handler(cfg Config) (http.Handler, error) {
 	// would mean this GET touching the row, and a GET that touches the row is
 	// one step from a GET that consumes it. The page asks, over the API, after
 	// it loads.
-	mux.HandleFunc("GET /p/{id}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		page, err := fs.ReadFile(sub, "paste.html")
-		if err != nil {
-			http.Error(w, "portal unavailable", http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write(page)
-	})
+	mux.Handle("GET /p/{id}", page(sub, "paste.html"))
 
-	// The operator console's PAGE. Its routes live in internal/operator and
-	// are mounted on the API's mux; this serves the HTML, so the page exists
-	// whether or not a provider is configured — and says which of the two it
-	// is, rather than 404ing at somebody who typed the address they were told
-	// to use.
+	// TWO CONSOLES, TWO ADDRESSES.
+	//
+	// /console is YOURS: your accounts, your devices, your invite. It is what
+	// signing in gets you, whoever you are, and it administers nothing — an
+	// ordinary member of somebody else's relay landing on a page headed
+	// "admin" was reading a true statement about the URL and a false one about
+	// the page.
+	//
+	// /console/relay is the relay's: everybody's accounts, quotas, deletions.
+	// Its only entrance is a link on /console shown to operators, so reaching
+	// it is a thing somebody did rather than a thing that happened to them.
+	// The page still checks for itself — the affordance is not the boundary,
+	// and the boundary is in internal/operator, on every route it calls.
+	//
+	// Both exist whether or not a provider is configured, and say which of the
+	// two it is, rather than 404ing at somebody who typed the address they
+	// were told to use. Their API routes live in internal/operator and are
+	// mounted on the API's mux; this serves only the HTML.
+	mux.Handle("GET /console", page(sub, "console.html"))
+	mux.Handle("GET /console/relay", page(sub, "relay.html"))
+
+	// /admin was the single stacked console and is in every version of the
+	// docs, in the sign-in flow's redirect, and in whatever people bookmarked.
+	// It keeps working, one hop away, rather than becoming a 404 that reads as
+	// "the console is gone".
 	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		page, err := fs.ReadFile(sub, "admin.html")
-		if err != nil {
-			http.Error(w, "portal unavailable", http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write(page)
+		http.Redirect(w, r, "/console", http.StatusFound)
 	})
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +103,22 @@ func Handler(cfg Config) (http.Handler, error) {
 	})
 
 	return headers(mux), nil
+}
+
+// page serves one embedded HTML file. Every page the portal serves is
+// no-store: they are all either a console rendering somebody's session or a
+// paste that must not sit in a cache.
+func page(sub fs.FS, name string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		body, err := fs.ReadFile(sub, name)
+		if err != nil {
+			http.Error(w, "portal unavailable", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(body)
+	})
 }
 
 // The Content-Security-Policy is the paste's real defence, and it is worth
