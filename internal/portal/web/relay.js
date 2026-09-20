@@ -158,8 +158,8 @@ async function loadAccounts(me) {
       // and after this there is nothing to get it out of.
       const ok = window.confirm(
         `Delete account ${a.accountId}?\n\n` +
-          `Everything this relay holds for it goes: ${a.devices} device ` +
-          `record${a.devices === 1 ? '' : 's'} and ${bytes(a.usedBytes)} of sealed data. ` +
+          `Everything this relay holds for it goes: ${a.rosterEntries} ` +
+          `roster entr${a.rosterEntries === 1 ? 'y' : 'ies'} and ${bytes(a.usedBytes)} of sealed data. ` +
           `This relay cannot read any of it, so it cannot be exported first, and it cannot be undone.\n\n` +
           `Their devices keep whatever is already on them.`
       )
@@ -174,7 +174,7 @@ async function loadAccounts(me) {
     })
     actions.append(del)
 
-    tr.append(shortId(a.accountId), owner, cell(String(a.devices)), cell(bytes(a.usedBytes)), quota, actions)
+    tr.append(shortId(a.accountId), owner, cell(String(a.rosterEntries)), cell(bytes(a.usedBytes)), quota, actions)
     body.append(tr)
   }
 }
@@ -244,7 +244,9 @@ async function main() {
     note: $('mint-note'),
     out: $('invite'),
     warn: $('invite-warn'),
-    path: '/admin/v1/invite?hours=24'
+    path: '/admin/v1/invite?hours=24',
+    plain: $('invite-plain'),
+    plainLabel: $('invite-plain-label')
   })
 
   await refreshAll(me).catch(fail)

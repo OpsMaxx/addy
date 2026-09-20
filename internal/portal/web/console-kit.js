@@ -206,18 +206,52 @@ export function cell(text, cls) {
  *     "creating the invite failed" while the invite sat on screen, already
  *     spent.
  */
-export function wireMint({ button, note, out, warn, path }) {
+
+/**
+ * The `opsmaxx://` link for an invite.
+ *
+ * Built from `location.origin`, so it names the relay the person is actually
+ * looking at rather than whatever a configuration file thinks this box is
+ * called. The client refuses a link whose relay is not https (except on
+ * loopback, for a dev relay), has credentials in it, or carries a path — see
+ * `parseAddyLink` on that side; this is the half that has to agree with it.
+ */
+function inviteLink(invite) {
+  const r = new URL(location.origin)
+  return `opsmaxx://sync?relay=${encodeURIComponent(`${r.protocol}//${r.host}`)}&invite=${encodeURIComponent(invite)}`
+}
+
+export function wireMint({ button, note, out, warn, path, plain, plainLabel }) {
   button.addEventListener('click', async () => {
     button.disabled = true
     note.textContent = 'Creating…'
     clearProblem()
     try {
       const { invite, hours } = await api(path, { method: 'POST' })
-      out.textContent = invite
+      // THE TOKEN ALONE IS NOT ENOUGH TO ACT ON. A machine that has never
+      // synced does not know this relay's address, and nothing on it does —
+      // the person was expected to remember the hostname and type it into a
+      // field before the token could be used at all. The link carries both.
+      //
+      // Both are offered because neither works everywhere: a link is one
+      // click on a machine that has OpsMaxx installed, and a token is what
+      // survives a chat window that mangles unknown schemes, a QR code, or a
+      // phone call.
+      out.textContent = inviteLink(invite)
       out.hidden = false
       warn.hidden = false
       note.textContent = `Valid for ${hours} hours, and it works once.`
-      if (await copy(invite)) note.textContent += ' Copied to your clipboard.'
+      if (await copy(out.textContent)) note.textContent += ' Copied to your clipboard.'
+      if (plain) {
+        plain.textContent = invite
+        plain.hidden = false
+      }
+      // HANDED IN, NOT LOOKED UP FROM A BUILT ID. Deriving the label's id from
+      // the token's put the only reference to it inside a template string,
+      // where nothing reading the page can find it — which is precisely how a
+      // control becomes unreachable without anybody noticing. The contract
+      // test refused it, correctly.
+      if (plainLabel) plainLabel.hidden = false
     } catch (err) {
       note.textContent = ''
       fail(err)

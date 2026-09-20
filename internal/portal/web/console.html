@@ -72,7 +72,9 @@
             <span id="mint-mine-note" class="fine"></span>
           </p>
           <code id="invite-mine" class="token" hidden></code>
-          <p id="invite-mine-warn" class="fine flush" hidden>
+                    <p class="fine" id="invite-mine-plain-label" hidden>Or paste this code into OpsMaxx by hand:</p>
+          <code id="invite-mine-plain" class="token" hidden></code>
+<p id="invite-mine-warn" class="fine flush" hidden>
             Copy it now — it is shown once and this page cannot show it again.
             Hand it over the way you would a password.
           </p>
@@ -85,7 +87,7 @@
           <div class="split">
             <div class="stat">
               <span class="stat-value" id="stat-devices">0</span>
-              <span class="stat-label">Devices</span>
+              <span class="stat-label">Roster entries</span>
             </div>
             <!-- Shown only when there is more than one. A person with a single
                  sync group has no decision to make about it, and a stat reading
@@ -108,7 +110,7 @@
               <thead>
                 <tr>
                   <th>Sync group</th>
-                  <th>Devices</th>
+                  <th>Roster entries</th>
                   <th>Used</th>
                   <th>Created</th>
                 </tr>
@@ -120,6 +122,15 @@
             <p><strong>Nothing here yet</strong></p>
             <p class="fine flush" id="no-mine-text"></p>
           </div>
+          <p class="fine">
+            <strong>This is not a device count, and the relay cannot produce one.</strong>
+            A roster entry is a change to your device list — a machine joining, a
+            machine being removed, a key being rotated — and a removal adds an
+            entry rather than taking one away. Working out how many devices are
+            live means verifying the chain, which needs a key this server does
+            not have. Open <em>Sync &amp; devices</em> in OpsMaxx for the real
+            list.
+          </p>
           <p class="fine">
             <strong>Device names are not shown here, and cannot be.</strong>
             Each device's name is encrypted under your account key before it

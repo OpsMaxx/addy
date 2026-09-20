@@ -146,6 +146,36 @@ func nameOf(as int) string {
 	return [...]string{"an anonymous caller", "a member", "the operator"}[as]
 }
 
+// Deleting a sync group is the one irreversible thing a member can do, and the
+// id comes from the URL — so the only thing standing between a member and
+// somebody else's data is the ownership check reading the store rather than
+// the request.
+func TestAMemberCanDeleteOnlyTheirOwnSyncGroup(t *testing.T) {
+	r := relayWith(t, SignupOpen)
+	r.admin.owned = map[string][]AccountView{
+		r.opID:  {{AccountID: "the-operators-account"}},
+		r.memID: {{AccountID: "the-members-account"}},
+	}
+
+	if code, body := r.ask(t, member, http.MethodDelete, "/admin/v1/my/accounts/the-operators-account"); code != http.StatusNotFound {
+		t.Fatalf("a member deleting somebody else's group answered %d, want 404: %s", code, strings.TrimSpace(body))
+	}
+	if len(r.admin.deleted) != 0 {
+		t.Fatalf("a member's delete of somebody else's group reached the store: %v", r.admin.deleted)
+	}
+
+	if code, body := r.ask(t, member, http.MethodDelete, "/admin/v1/my/accounts/the-members-account"); code != http.StatusNoContent {
+		t.Fatalf("a member deleting their own group answered %d, want 204: %s", code, strings.TrimSpace(body))
+	}
+	if len(r.admin.deleted) != 1 || r.admin.deleted[0] != "the-members-account" {
+		t.Fatalf("the member's own group was not the one deleted: %v", r.admin.deleted)
+	}
+
+	if code, _ := r.ask(t, anonymous, http.MethodDelete, "/admin/v1/my/accounts/the-members-account"); code != http.StatusUnauthorized {
+		t.Errorf("an anonymous caller deleting a group answered %d, want 401", code)
+	}
+}
+
 func TestEveryConsoleRouteForEveryCallerOnEveryPolicy(t *testing.T) {
 	// `{id}` is filled with a real person who has no session, so the operator
 	// rows exercise a row that exists rather than a 404 path, and no cell
@@ -416,8 +446,14 @@ func TestAMemberCannotReachAnotherPersonsAccountsByAnyRouteOrParameter(t *testin
 		"/admin/v1/my/accounts/" + r.opID,
 	} {
 		code, body := r.ask(t, member, http.MethodGet, path)
-		if code == http.StatusNotFound {
-			continue // no such route, which is the same answer by other means
+		if code == http.StatusNotFound || code == http.StatusMethodNotAllowed {
+			// 404: no such route. 405: the path exists for a different verb —
+			// `DELETE /admin/v1/my/accounts/{id}`, which a person uses to
+			// delete their OWN group. Both refuse without answering the
+			// question this test asks, and neither varies by who is asking, so
+			// neither tells a member anything about somebody else. What would
+			// fail here is a 200.
+			continue
 		}
 		if code != http.StatusOK {
 			t.Errorf("GET %s answered %d: %s", path, code, strings.TrimSpace(body))
@@ -477,6 +513,14 @@ type blockingAdmin struct {
 	stubAdmin
 	blocked map[string]bool
 	owned   map[string][]AccountView
+	// What actually reached the store. A route that refuses with the right
+	// status while still deleting would pass a status assertion.
+	deleted []string
+}
+
+func (b *blockingAdmin) DeleteAccount(_ context.Context, accountID string) error {
+	b.deleted = append(b.deleted, accountID)
+	return nil
 }
 
 func (b *blockingAdmin) SetUserBlocked(_ context.Context, userID string, blocked bool) error {

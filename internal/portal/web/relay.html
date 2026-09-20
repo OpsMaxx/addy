@@ -145,7 +145,9 @@
             <span id="mint-note" class="fine"></span>
           </p>
           <code id="invite" class="token" hidden></code>
-          <p id="invite-warn" class="fine flush" hidden>Copy it now — shown once, works once.</p>
+                    <p class="fine" id="invite-plain-label" hidden>Or paste this code into OpsMaxx by hand:</p>
+          <code id="invite-plain" class="token" hidden></code>
+<p id="invite-warn" class="fine flush" hidden>Copy it now — shown once, works once.</p>
         </div>
 
         <div class="card">
@@ -156,13 +158,20 @@
             not a device name, not a server, not a file. Devices are added and
             removed from OpsMaxx, where the keys are.
           </p>
+          <p class="fine">
+            <strong>Roster entries are not devices.</strong> An entry is a change
+            to a device list, and a removal adds one rather than taking one away
+            — so the number goes up when somebody removes a machine. Counting
+            live devices means verifying the chain, which needs a key this relay
+            does not have.
+          </p>
           <div id="accounts-shell" class="scroller" hidden>
             <table class="listing">
               <thead>
                 <tr>
                   <th>Sync group</th>
                   <th>Owner</th>
-                  <th>Devices</th>
+                  <th>Roster entries</th>
                   <th>Used</th>
                   <th>Quota</th>
                   <th>Actions</th>

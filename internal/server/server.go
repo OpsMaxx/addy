@@ -601,12 +601,12 @@ func accountViews(rows []store.AccountSummary) []operator.AccountView {
 	out := make([]operator.AccountView, 0, len(rows))
 	for _, r := range rows {
 		v := operator.AccountView{
-			AccountID: r.AccountID,
-			Owner:     r.OwnerEmail,
-			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
-			Devices:   r.Devices,
-			UsedBytes: r.UsedBytes,
-			QuotaByte: r.QuotaByte,
+			AccountID:     r.AccountID,
+			Owner:         r.OwnerEmail,
+			CreatedAt:     r.CreatedAt.UTC().Format(time.RFC3339),
+			RosterEntries: r.Devices,
+			UsedBytes:     r.UsedBytes,
+			QuotaByte:     r.QuotaByte,
 		}
 		// Omitted rather than sent as the zero time. A device that has never
 		// checked in is a real state, and 1970 is not what it looks like.

@@ -21,20 +21,20 @@ async function loadMine() {
   $('no-mine-text').textContent =
     'No devices on this relay yet. Create an invite above, then paste it into OpsMaxx along with this relay’s address to set up your first one.'
 
-  let devices = 0
+  let entries = 0
   let used = 0
   for (const a of accounts) {
-    devices += a.devices
+    entries += a.rosterEntries
     used += a.usedBytes
     const tr = document.createElement('tr')
-    tr.append(shortId(a.accountId), cell(String(a.devices)), cell(bytes(a.usedBytes)), cell(when(a.createdAt)))
+    tr.append(shortId(a.accountId), cell(String(a.rosterEntries)), cell(bytes(a.usedBytes)), cell(when(a.createdAt)))
     body.append(tr)
   }
 
   // DEVICES ARE WHAT A PERSON HAS; a sync group is an implementation detail
   // they only need when they have two. Counted from the same rows the table
   // below shows, so the two cannot disagree.
-  $('stat-devices').textContent = String(devices)
+  $('stat-devices').textContent = String(entries)
   $('stat-stored').textContent = bytes(used)
   $('stat-groups').textContent = String(accounts.length)
   $('stat-groups-block').hidden = accounts.length < 2
@@ -87,7 +87,9 @@ function wireMyInvite(groups) {
     note: $('mint-mine-note'),
     out: $('invite-mine'),
     warn: $('invite-mine-warn'),
-    path: '/admin/v1/my/invite'
+    path: '/admin/v1/my/invite',
+    plain: $('invite-mine-plain'),
+    plainLabel: $('invite-mine-plain-label')
   })
 }
 

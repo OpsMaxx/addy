@@ -46,9 +46,18 @@ func fault(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrBlocked):
 		problem(w, http.StatusForbidden, errors.New("this account has been blocked on this relay; ask whoever runs it"))
 	case errors.Is(err, ErrHasAccount):
+		// THE OLD MESSAGE NAMED ONE WAY OUT AND ASSUMED IT WAS AVAILABLE.
+		// "Pair from one you already have" is no help at all to somebody whose
+		// devices are gone, or who left the account on their only machine —
+		// which is exactly when a person reaches for a fresh invite. All three
+		// real routes are named, and the destructive one is named last and as
+		// what it is.
 		problem(w, http.StatusConflict, errors.New(
-			"you already have a sync group on this relay. Add another device by pairing from one you already have, "+
-				"rather than with an invite — a second invite would start a separate group that cannot see the first"))
+			"you already have a sync group on this relay, and its data is still here. "+
+				"If a device of yours still works, add this one by pairing from it. "+
+				"If none do, use your twelve-word recovery phrase — that is what it is for. "+
+				"Only if you want to abandon what is in that group and start over should you delete it first, "+
+				"which cannot be undone and which this relay cannot do for you because it cannot read any of it"))
 	default:
 		problem(w, http.StatusInternalServerError, err)
 	}
@@ -108,10 +117,19 @@ type AccountView struct {
 	// relay had lost track of something it never knew.
 	Owner     string `json:"owner,omitempty"`
 	CreatedAt string `json:"createdAt"`
-	Devices   int    `json:"devices"`
-	UsedBytes int64  `json:"usedBytes"`
-	QuotaByte int64  `json:"quotaBytes"`
-	LastSeen  string `json:"lastSeen,omitempty"`
+	// NOT A DEVICE COUNT, AND IT NEVER WAS. These are entries in the
+	// hash-chained roster: joins, removals and epoch transitions, and removals
+	// only ever add. So the number goes UP when somebody is removed, which is
+	// precisely backwards from what a column headed "Devices" promises.
+	//
+	// The relay cannot do better. Computing the live set means verifying the
+	// chain, and verifying it means holding a key this server does not have and
+	// must never have. So it reports what it can count and says what that is.
+	// OpsMaxx, which holds the key, shows the real list.
+	RosterEntries int    `json:"rosterEntries"`
+	UsedBytes     int64  `json:"usedBytes"`
+	QuotaByte     int64  `json:"quotaBytes"`
+	LastSeen      string `json:"lastSeen,omitempty"`
 }
 
 const cookieName = "addy_operator"
@@ -274,6 +292,41 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 			return
 		}
 		writeJSON(w, map[string]any{"signup": string(p), "signupSource": "console"})
+	}))
+
+	// DELETING YOUR OWN SYNC GROUP, because the alternative is asking an
+	// operator to do it — and on a relay where everybody sets up their own
+	// devices, the one irreversible step should not be the one that needs
+	// somebody else.
+	//
+	// Ownership is read from the store, never from the request: the id in the
+	// path is checked against what this person owns, so a member cannot name
+	// somebody else's group. The operator route is separate and still exists.
+	mux.Handle("DELETE /admin/v1/my/accounts/{id}", a.signedIn(func(w http.ResponseWriter, r *http.Request, who Signed) {
+		id := r.PathValue("id")
+		mine, err := admin.AccountsOf(r.Context(), who.UserID)
+		if err != nil {
+			fault(w, err)
+			return
+		}
+		owned := false
+		for _, a := range mine {
+			if a.AccountID == id {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			// Not found rather than forbidden: a member asking about a group
+			// that is not theirs learns nothing about whether it exists.
+			problem(w, http.StatusNotFound, errors.New("you have no sync group by that name"))
+			return
+		}
+		if err := admin.DeleteAccount(r.Context(), id); err != nil {
+			fault(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	mux.Handle("GET /admin/v1/users", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
