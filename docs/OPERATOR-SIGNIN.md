@@ -79,20 +79,39 @@ useful form; Google keeps it retrievable, but treat it as a password.
 
 ## 4. Restart the relay with the three flags
 
-```sh
-addy serve \
+**Put all three in the environment, not on the command line.** `systemd`
+expands a `${VAR}` in `ExecStart` into the argv it executes, so a unit that
+passes the secret as a flag puts it in `/proc/<pid>/cmdline` and in every `ps`
+on the box — which is the thing an `EnvironmentFile` was chosen to avoid. The
+flags still exist and still work; the environment is what you should use.
+
+`/etc/addy.env`, mode `0600`:
+
+```
+ADDY_OIDC_ISSUER=https://accounts.google.com
+ADDY_OIDC_CLIENT_ID=<your client id>
+ADDY_OIDC_CLIENT_SECRET=<your client secret>
+```
+
+`/etc/systemd/system/addy.service`:
+
+```ini
+[Service]
+EnvironmentFile=/etc/addy.env
+ExecStart=/usr/local/bin/addy serve \
   -domain addy.opsmaxx.dev \
-  -ui \
-  -oidc-issuer https://accounts.google.com \
-  -oidc-client-id  "$ADDY_OIDC_CLIENT_ID" \
-  -oidc-client-secret "$ADDY_OIDC_CLIENT_SECRET"
+  -data-dir /var/lib/addy \
+  -ui
 ```
 
 `-ui` serves the public portal. The console's API is mounted whether or not
 `-ui` is on, but the page it renders comes from the portal, so you want both.
 
-With systemd, put the two values in an `EnvironmentFile` mode `0600` and
-reference them as above.
+Check it worked:
+
+```sh
+tr '\0' ' ' < /proc/$(pgrep -x addy)/cmdline | grep -c oidc   # expect 0
+```
 
 **All three flags or none.** With any of them missing, no admin route exists
 at all and the page says to use the `addy` command — an unconfigured console

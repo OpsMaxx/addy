@@ -136,7 +136,7 @@ func serve(args []string) error {
 	fs.StringVar(&cfg.OIDCClientID, "oidc-client-id", "",
 		"OAuth client id for the operator portal. The redirect URI to register with the provider is https://<your-domain>/admin/callback")
 	fs.StringVar(&cfg.OIDCClientSecret, "oidc-client-secret", "",
-		"OAuth client secret for the operator portal. THE FIRST PERSON TO SIGN IN CLAIMS THIS RELAY and everybody after has to be them; without that, every account at the provider would be an administrator here")
+		"OAuth client secret for the operator portal. PREFER THE ENVIRONMENT: leave this unset and put the value in ADDY_OIDC_CLIENT_SECRET, because a secret passed as a flag is in /proc/<pid>/cmdline and every ps on the box. THE FIRST PERSON TO SIGN IN CLAIMS THIS RELAY and everybody after has to be them; without that, every account at the provider would be an administrator here")
 	fs.StringVar(&cfg.TurnExternal, "turn", "",
 		"Use an external TURN server instead of the embedded one, as turn:host:port. Devices are told to use it and this box relays nothing")
 	if err := fs.Parse(args); err != nil {
@@ -158,6 +158,16 @@ func serve(args []string) error {
 	envDefault(&cfg.TurnExternal, "ADDY_TURN_EXTERNAL", "")
 	envDefault(&cfg.HeadscaleURL, "ADDY_HEADSCALE_URL", "")
 	envDefault(&cfg.HeadscaleAPIKey, "ADDY_HEADSCALE_APIKEY", "")
+	envDefault(&cfg.OIDCIssuer, "ADDY_OIDC_ISSUER", "")
+	envDefault(&cfg.OIDCClientID, "ADDY_OIDC_CLIENT_ID", "")
+	// THE SECRET SHOULD COME FROM HERE, not from a flag.
+	//
+	// systemd expands `${VAR}` in an ExecStart into the argv it executes, so
+	// a unit that passes the secret as a flag puts it in /proc/<pid>/cmdline
+	// and in every `ps` on the box — which is the thing an EnvironmentFile was
+	// chosen to avoid. Read here, the value stays in the process environment,
+	// which is readable only by the process owner and root.
+	envDefault(&cfg.OIDCClientSecret, "ADDY_OIDC_CLIENT_SECRET", "")
 
 	if cfg.ACMECA == "" && *staging {
 		cfg.ACMECA = frontdoor.LetsEncryptStaging
