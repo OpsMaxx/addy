@@ -166,7 +166,12 @@ func statusFor(err error) int {
 	switch {
 	case errors.Is(err, store.ErrETagMismatch), errors.Is(err, store.ErrObjectExists),
 		errors.Is(err, store.ErrSeqTaken), errors.Is(err, store.ErrSeqGap),
-		errors.Is(err, store.ErrAccountExists):
+		errors.Is(err, store.ErrAccountExists),
+		// One email is one sync group. A well-formed registration refused by
+		// the state of the world, which is what 409 is for — and the same code
+		// ErrAccountExists already uses, because to the device they are the
+		// same answer: this group cannot be created.
+		errors.Is(err, store.ErrHasAccount):
 		return http.StatusConflict
 	case errors.Is(err, store.ErrNoAccount):
 		return http.StatusNotFound

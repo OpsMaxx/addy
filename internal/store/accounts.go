@@ -92,6 +92,29 @@ func (d *DB) CreateAccount(ctx context.Context, accountID string, rootSignPub []
 		// is the right thing for one handed to somebody who has not signed in:
 		// the account then belongs to nobody until it does.
 		if mintedFor.Valid {
+			// ONE EMAIL IS ONE SYNC GROUP, and this is where it is enforced
+			// rather than at minting.
+			//
+			// Minting checks too, so somebody is told before they carry a
+			// token to a device. But an invite minted while they had nothing
+			// is still a valid token afterwards, so the only check that
+			// actually holds is the one at the moment the group would come
+			// into existence.
+			//
+			// It is safe as a read-then-write inside this transaction because
+			// this store has a single writer: no second registration can land
+			// between the count and the insert. An invite minted for nobody is
+			// not covered at all — there is no email to hold to one group —
+			// which is the deliberate limit of a rule stated in terms of
+			// identity.
+			var owns int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT count(*) FROM account_owners WHERE user_id = ?`, mintedFor.String).Scan(&owns); err != nil {
+				return fmt.Errorf("store: checking what %s already owns: %w", mintedFor.String, err)
+			}
+			if owns > 0 {
+				return ErrHasAccount
+			}
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO account_owners (account_id, user_id, linked_at) VALUES (?, ?, ?)
 				 ON CONFLICT(account_id) DO NOTHING`,

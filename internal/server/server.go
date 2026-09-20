@@ -532,6 +532,8 @@ func translate(err error) error {
 		return fmt.Errorf("%w: %w", operator.ErrNotFound, err)
 	case errors.Is(err, store.ErrBlocked):
 		return fmt.Errorf("%w: %w", operator.ErrBlocked, err)
+	case errors.Is(err, store.ErrHasAccount):
+		return fmt.Errorf("%w: %w", operator.ErrHasAccount, err)
 	default:
 		return err
 	}

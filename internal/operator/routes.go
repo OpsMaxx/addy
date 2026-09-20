@@ -26,6 +26,9 @@ var (
 	// ErrBlocked is a person the operator has switched off. A 403 carrying the
 	// reason, not a 500 carrying the store's internal layering.
 	ErrBlocked = errors.New("operator: that account is blocked")
+	// ErrHasAccount is somebody with a sync group asking for a second. A 409:
+	// the request is well formed and the state of the world refuses it.
+	ErrHasAccount = errors.New("operator: that user already has a sync group")
 )
 
 // fault maps an error to the status code that describes it, and to a sentence
@@ -42,6 +45,10 @@ func fault(w http.ResponseWriter, err error) {
 		problem(w, http.StatusNotFound, errors.New("there is nothing here by that name; it may have been deleted"))
 	case errors.Is(err, ErrBlocked):
 		problem(w, http.StatusForbidden, errors.New("this account has been blocked on this relay; ask whoever runs it"))
+	case errors.Is(err, ErrHasAccount):
+		problem(w, http.StatusConflict, errors.New(
+			"you already have a sync group on this relay. Add another device by pairing from one you already have, "+
+				"rather than with an invite — a second invite would start a separate group that cannot see the first"))
 	default:
 		problem(w, http.StatusInternalServerError, err)
 	}

@@ -32,6 +32,18 @@ var (
 	// "sign in first" are different sentences and only one of them is worth
 	// contacting somebody about.
 	ErrBlocked = errors.New("store: that user is blocked")
+	// ErrHasAccount is somebody who already has a sync group asking for a
+	// second one.
+	//
+	// ONE EMAIL IS ONE SYNC GROUP. A second group is not more room, it is a
+	// second set of devices that cannot see the first: separate key, separate
+	// roster, no sync between them — and this relay cannot merge them
+	// afterwards, because it holds no key to either. Somebody who ends up with
+	// two has lost the use of one and has no way back.
+	//
+	// Adding a device to the group you have is pairing, which needs no invite
+	// and nobody's permission.
+	ErrHasAccount = errors.New("store: that user already has a sync group")
 )
 
 // User is a person who has signed in to this relay.
@@ -233,6 +245,14 @@ func (d *DB) NewInviteFor(ctx context.Context, userID string, ttl time.Duration)
 			}
 			if blockedAt.Valid {
 				return ErrBlocked
+			}
+			var owns int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT count(*) FROM account_owners WHERE user_id = ?`, userID).Scan(&owns); err != nil {
+				return err
+			}
+			if owns > 0 {
+				return ErrHasAccount
 			}
 		}
 		var owner any
