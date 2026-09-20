@@ -5,60 +5,133 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
 <title>addy</title>
+<!-- portal.css first: it owns the brand tokens, the type scale and every
+     shared component on this page. home.css only adds what exists nowhere
+     else. No <style> block and no style attribute anywhere: the CSP has no
+     'unsafe-inline' and a test asserts this markup needs no weaker policy. -->
 <link rel="stylesheet" href="/assets/portal.css">
+<link rel="stylesheet" href="/assets/home.css">
 </head>
 <body>
-<main>
-  <h1>addy</h1>
-  <p class="lede">This is an addy relay. It is working.</p>
+<header class="topbar">
+  <p class="brand"><span class="brand-mark">a</span><span class="brand-word">addy</span></p>
+  <nav aria-label="Console">
+    <a class="button ghost small" href="/console">Your console</a>
+  </nav>
+</header>
 
-  <section class="warn">
-    <h2>Never type your recovery phrase here</h2>
+<main class="home">
+  <section class="hero" aria-labelledby="what">
+    <p class="status"><span class="status-dot"></span>Relay up</p>
+    <h1 id="what">A relay that <span class="tint">holds no key</span>.</h1>
+    <p class="lede">
+      This is somebody&rsquo;s addy relay. It carries messages and files
+      between OpsMaxx devices, sealed before they ever arrive &mdash; so this
+      server cannot read anything it stores, and neither can whoever runs it.
+    </p>
+  </section>
+
+  <!-- The common arrival: someone was handed an invite and is looking for the
+       box to paste it into. There is no box, and saying so plainly is the
+       whole job of this card. It is .card.feature because if a visitor reads
+       one thing on this page, this is the one. -->
+  <section class="act" aria-labelledby="invite">
+    <div class="card feature">
+      <h2 id="invite">Have an invite?</h2>
+      <p class="big">
+        Open OpsMaxx and paste it there, along with this relay&rsquo;s address.
+        That creates your account.
+      </p>
+      <p class="fine flush">
+        There is no field for it on this page, and there never will be. An
+        invite is typed into the app, not into a browser.
+      </p>
+    </div>
+  </section>
+
+  <section class="warn" aria-labelledby="phrase">
+    <h2 id="phrase">Never type your recovery phrase here</h2>
     <p>
       Your recovery phrase is entered in the OpsMaxx desktop app and nowhere
       else &mdash; not in this page, not in any browser, for any reason. This
       page has no field for it, and a page that asks you for it is an attack.
     </p>
-    <p>
+    <p class="flush">
       For the same reason, compare your device-list fingerprint between two
       OpsMaxx windows rather than reading it here. An integrity check reported
       by the thing being checked is not a check.
     </p>
   </section>
 
-  <section>
-    <h2>Connecting a device</h2>
-    <p>
-      Your <em>first</em> device needs an invite from whoever runs this relay.
-      Paste it into OpsMaxx along with this address, and it creates your
-      account.
-    </p>
-    <p>
-      Every device after that is added by <em>pairing</em>: open OpsMaxx on
-      both machines, one shows a code, and you check the same seven emoji
-      appear on each. No invite, and nothing to type here. The relay cannot add
-      a device by itself and never sees your data.
-    </p>
-    <p>
-      If you have lost every device, your twelve-word recovery phrase gets you
-      back in — in the OpsMaxx app, never on this page.
+  <section aria-labelledby="devices">
+    <h2 id="devices">Getting your devices on</h2>
+    <ol class="path split">
+      <li>
+        <h3>Invite</h3>
+        <p>
+          Your <em>first</em> device needs an invite from whoever runs this
+          relay. It is what creates your account.
+        </p>
+      </li>
+      <li>
+        <h3>Pair</h3>
+        <p>
+          Every device after that is added by pairing: both apps open, one
+          shows a code, and you check the same seven emoji appear on each.
+          No invite, and nothing to type here.
+        </p>
+      </li>
+      <li>
+        <h3>Recover</h3>
+        <p>
+          If you have lost <em>every</em> device, your twelve-word recovery
+          phrase gets you back in &mdash; in the OpsMaxx app, never on this
+          page.
+        </p>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="sees">
+    <h2 id="sees">What this relay can see</h2>
+    <ul class="facts split">
+      <li class="stat">
+        <span class="stat-value">Nothing</span>
+        <span class="stat-label">of what you send &mdash; it is sealed before it reaches here</span>
+      </li>
+      <li class="stat">
+        <span class="stat-value">No names</span>
+        <span class="stat-label">your device names are sealed too</span>
+      </li>
+      <li class="stat">
+        <span class="stat-value">Counts</span>
+        <span class="stat-label">and sizes, because that is all that is left</span>
+      </li>
+    </ul>
+    <p class="fine flush">
+      The relay cannot add a device by itself, and signing in to the console
+      does not change any of this. There is no key here to sign in to.
     </p>
   </section>
 
-  <section>
-    <h2>Running this relay</h2>
-    <p>
-      If this relay is yours, the <a href="/admin">operator console</a> is
-      where you create invites and see how many accounts and devices are on it.
-      It shows counts and sizes and nothing else: this server holds no key, so
-      there is nothing else for it to show.
-    </p>
+  <section class="ops" aria-labelledby="running">
+    <h2 id="running">Running this relay</h2>
+    <div class="card">
+      <p>
+        If this relay is yours, sign in to your console: an operator gets a
+        card there on to the operator view, which is where you create invites
+        for people who have not signed in and see how many accounts and
+        devices are on the relay. It shows counts and sizes and nothing else:
+        this server holds no key, so there is nothing else for it to show.
+      </p>
+      <p class="flush"><a class="button" href="/console">Open your console</a></p>
+    </div>
   </section>
-
-  <footer>
-    <p id="build"></p>
-  </footer>
 </main>
+
+<footer class="homefoot">
+  <p id="build"></p>
+</footer>
 <script src="/assets/portal.js"></script>
 </body>
 </html>

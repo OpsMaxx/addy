@@ -1,289 +1,806 @@
+/* addy portal — the design system for every page this relay serves.
+ *
+ * THE BRAND IS OPSMAXX'S AND IT IS NOT INVENTED HERE. The desktop app this
+ * relay exists to serve is dark-primary with a cyan/teal accent, and its token
+ * file carries reasoning this one deliberately mirrors rather than re-deriving:
+ * two accent roles that are not interchangeable, a contrast floor that holds on
+ * every surface, and an identifier size below which people mistype what they
+ * copy. A portal that looked like a different product would be a portal people
+ * could not tell was part of the same one.
+ *
+ * WHAT CHANGED AND WHY: this file previously defined eleven classes. The
+ * console used most of them. The home page used eight classes that were never
+ * defined at all — `topbar`, `brand`, `facts`, `act`, `path`, `homefoot` — so
+ * the markup carried structure the stylesheet never rendered, and the page came
+ * out as undifferentiated prose. That is exactly what it was reported as.
+ *
+ * WHERE THE HOME PAGE'S OWN CLASSES LIVE NOW: `topbar` and `brand` are here,
+ * because every page has a masthead. `facts`, `act` and `path` are in
+ * `home.css` and belong to that page alone. Do not define them here as well —
+ * two definitions of one class across two files is a rule nobody can predict
+ * the winner of, and the loser is whichever file the page happened to load
+ * first.
+ */
+
+/* ---------------------------------------------------------------------------
+   Tokens. Dark is the primary theme, not a media-query branch.
+   --------------------------------------------------------------------------- */
+
 :root {
-  color-scheme: light dark;
-  --bg: #fbfbfa;
-  --fg: #1a1a18;
-  --muted: #6b6b66;
-  --rule: #e3e3df;
-  --warn-bg: #fff6e5;
-  --warn-fg: #6b4a00;
-  --warn-rule: #e8c986;
+  color-scheme: dark;
+
+  --bg-app: #0d1017;
+  --bg-panel: #161b26;
+  --bg-card: #1b2130;
+  --bg-elevated: #1f2635;
+  --bg-hover: #212a3a;
+  --bg-input: #1a2130;
+  --bg-scrim: rgba(6, 9, 14, 0.62);
+
+  --border: #262d3d;
+  --border-strong: #333c50;
+  --border-subtle: #1e2431;
+
+  --text: #e6edf3;
+  --text-muted: #9aa4b2;
+  --text-faint: #8f97a6;
+  --text-inverse: #0d1017;
+
+  /* TWO ACCENT ROLES, AND ONE VALUE SATISFIES BOTH ONLY BY LUCK.
+     `--accent` is a FILL; whatever sits on it is `--accent-text`.
+     `--accent-ink` is the accent used AS TEXT on a `--bg-*` surface.
+     They coincide in this theme and genuinely diverge in the light one, which
+     is where keeping both earns itself: changing the brand colour later cannot
+     silently break one role while the other still looks right. */
+  --accent: #22c7d6;
+  --accent-ink: #22c7d6;
+  --accent-hover: #45d6e2;
+  --accent-press: #17aab8;
+  --accent-soft: rgba(34, 199, 214, 0.14);
+  --accent-border: rgba(34, 199, 214, 0.45);
+  --accent-text: #0b1013;
+  --brand-grad-end: #1a8fbf;
+  --brand-ink: #04141a;
+
+  --warn: #d29922;
+  --warn-soft: rgba(210, 153, 34, 0.15);
+  --danger: #f85149;
+  --danger-soft: rgba(248, 81, 73, 0.15);
+  --danger-ink: #ffffff;
+  --ok: #3fb950;
+  --ok-soft: rgba(63, 185, 80, 0.15);
+
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
+
+  /* Web scale, not the app's desktop density. The app sets body text at 13px
+     because it is a dense tool someone lives in; a page read once in a browser
+     at arm's length needs more. */
+  --fs-caption: 0.75rem;
+  --fs-fine: 0.85rem;
+  --fs-body: 0.95rem;
+  --fs-lead: 1.06rem;
+  --fs-h2: 1.15rem;
+  --fs-h1: clamp(1.9rem, 1.4rem + 2.2vw, 2.6rem);
+  --fs-display: clamp(2.2rem, 1.5rem + 3.4vw, 3.4rem);
+  --tracking-caption: 0.06em;
+
+  /* The floor for a string a person retypes into another window. An invite
+     token and an account id are both copied by hand often enough that mono
+     below this is where `rn` becomes `m` and the cost lands on somebody's
+     terminal. */
+  --fs-identifier: 0.82rem;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 56px;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.5);
+
+  --ring: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent-border);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #15151a;
-    --fg: #ececee;
-    --muted: #9a9aa2;
-    --rule: #2c2c34;
-    --warn-bg: #2e2415;
-    --warn-fg: #f2d79a;
-    --warn-rule: #6b5426;
+
+/* Light is a FULL override, both by explicit choice and by system preference.
+   Stated twice rather than once so a future toggle wins in both directions. */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-app: #f6f8fa;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: #eef2f6;
+  --bg-input: #ffffff;
+  --bg-scrim: rgba(30, 41, 59, 0.38);
+
+  --border: #d6dde5;
+  --border-strong: #bcc7d2;
+  --border-subtle: #e6ebf0;
+
+  --text: #16202b;
+  --text-muted: #5a6672;
+  --text-faint: #6b7784;
+  --text-inverse: #ffffff;
+
+  /* Here the two accent roles diverge: #22c7d6 as text on white is 1.9:1 and
+     unreadable, while as a fill it needs dark ink. That is the whole argument
+     for the pair. */
+  --accent: #157c86;
+  --accent-ink: #0f6570;
+  --accent-hover: #11666f;
+  --accent-press: #0d525a;
+  --accent-soft: rgba(21, 124, 134, 0.12);
+  --accent-border: rgba(21, 124, 134, 0.45);
+  --accent-text: #ffffff;
+  --brand-grad-end: #0d6f94;
+  --brand-ink: #f3f8fa;
+
+  --warn: #9a6700;
+  --warn-soft: rgba(154, 103, 0, 0.12);
+  --danger: #cf222e;
+  --danger-soft: rgba(207, 34, 46, 0.12);
+  --ok: #1a7f37;
+  --ok-soft: rgba(26, 127, 55, 0.12);
+
+  --shadow-sm: 0 1px 2px rgba(30, 41, 59, 0.1);
+  --shadow-md: 0 8px 24px rgba(30, 41, 59, 0.12);
+  --shadow-lg: 0 20px 50px rgba(30, 41, 59, 0.18);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+
+    --bg-app: #f6f8fa;
+    --bg-panel: #ffffff;
+    --bg-card: #ffffff;
+    --bg-elevated: #ffffff;
+    --bg-hover: #eef2f6;
+    --bg-input: #ffffff;
+    --bg-scrim: rgba(30, 41, 59, 0.38);
+
+    --border: #d6dde5;
+    --border-strong: #bcc7d2;
+    --border-subtle: #e6ebf0;
+
+    --text: #16202b;
+    --text-muted: #5a6672;
+    --text-faint: #6b7784;
+    --text-inverse: #ffffff;
+
+    --accent: #157c86;
+    --accent-ink: #0f6570;
+    --accent-hover: #11666f;
+    --accent-press: #0d525a;
+    --accent-soft: rgba(21, 124, 134, 0.12);
+    --accent-border: rgba(21, 124, 134, 0.45);
+    --accent-text: #ffffff;
+    --brand-grad-end: #0d6f94;
+    --brand-ink: #f3f8fa;
+
+    --warn: #9a6700;
+    --warn-soft: rgba(154, 103, 0, 0.12);
+    --danger: #cf222e;
+    --danger-soft: rgba(207, 34, 46, 0.12);
+    --ok: #1a7f37;
+    --ok-soft: rgba(26, 127, 55, 0.12);
+
+    --shadow-sm: 0 1px 2px rgba(30, 41, 59, 0.1);
+    --shadow-md: 0 8px 24px rgba(30, 41, 59, 0.12);
+    --shadow-lg: 0 20px 50px rgba(30, 41, 59, 0.18);
   }
 }
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
-}
-main { max-width: 42rem; margin: 0 auto; padding-block: 3rem; }
-h1 { font-size: 2rem; margin: 0 0 .25rem; letter-spacing: -.02em; }
-h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
-.lede { color: var(--muted); margin: 0 0 2.5rem; }
-section { border-top: 1px solid var(--rule); padding-top: 1.5rem; margin-bottom: 1.5rem; }
-section.warn {
-  border: 1px solid var(--warn-rule);
-  background: var(--warn-bg);
-  color: var(--warn-fg);
-  border-radius: 8px;
-  padding: 1.25rem;
-}
-p { margin: 0 0 .75rem; }
-footer { border-top: 1px solid var(--rule); padding-top: 1rem; margin-top: 2.5rem; }
-footer p { color: var(--muted); font-size: .8rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
 
-/* The paste reader. Its own block rather than reusing the status page's, since
-   the two have nothing in common but the frame. */
-main.paste #body {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--panel, #14181f);
-  border: 1px solid var(--line, #262d3d);
-  border-radius: 8px;
-  padding: 14px;
-  max-height: 60vh;
-  overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-}
-
-main.paste input[type='password'] {
-  display: block;
-  width: 100%;
-  max-width: 320px;
-  margin: 6px 0 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--line, #262d3d);
-  border-radius: 6px;
-  background: var(--panel, #14181f);
-  color: inherit;
-  font: inherit;
-}
-
-main.paste button {
-  padding: 9px 16px;
-  border: 1px solid var(--line, #262d3d);
-  border-radius: 6px;
-  background: var(--panel, #14181f);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-main.paste button:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-main.paste .fine {
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-/* `hidden` has to beat the display rules above it, or every state renders at
-   once on a page whose whole design is that only one does. */
-main.paste [hidden] {
+/* `hidden` MUST BEAT EVERY DISPLAY RULE IN THIS FILE, on every page.
+ *
+ * The browser's own `[hidden] { display: none }` is a user-agent rule, so any
+ * author rule setting `display` outranks it — and this file sets `display` on
+ * `.button`, `.row`, `.token`, `.chip` and more, which is most of what the
+ * console shows and hides. The effect is not cosmetic: a `.button` hidden
+ * because the viewer may not use it stays looking clickable and does nothing
+ * when clicked, because the code that attaches its listener is the same code
+ * that decided to hide it.
+ *
+ * This was found once and fixed only for `main.paste`. The console is
+ * `main.wrap`, so it kept the bug: signed-out visitors saw a Sign out button,
+ * and members of an invite-only relay saw a Create invite button that could
+ * not work. Scoped to one page, this rule is a trap for the next page.
+ */
+[hidden] {
   display: none !important;
 }
 
 /* ---------------------------------------------------------------------------
-   The console.
-   ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
 
-   Same tokens as the rest of the portal, extended rather than replaced: a
-   second palette for the admin pages would mean two things to keep in step and
-   a visible seam at the link between them.
-
-   The layout is deliberately plain. This is a page somebody opens to do one
-   thing — make an invite, look at who is on the relay — and then closes. */
-
-:root {
-  --accent: #2f6f4f;
-  --accent-fg: #ffffff;
-  --card: #ffffff;
-  --card-rule: #e8e8e4;
-  --danger: #8f2f2f;
-  --ok-bg: #edf6f0;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --accent: #4f9d76;
-    --accent-fg: #0d1512;
-    --card: #1c1c22;
-    --card-rule: #2a2a32;
-    --danger: #d98b8b;
-    --ok-bg: #16231c;
-  }
+* {
+  box-sizing: border-box;
 }
 
-.wrap {
-  max-width: 62rem;
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* A wash of the brand behind the page, strongest at the top where the
+     heading sits. Fixed so it does not swim as the page scrolls. */
+  background-image:
+    radial-gradient(900px 480px at 12% -12%, var(--accent-soft), transparent 70%),
+    radial-gradient(700px 420px at 92% -6%, rgba(26, 143, 191, 0.10), transparent 72%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+main {
+  max-width: 54rem;
   margin: 0 auto;
-  padding: 2.5rem 1.25rem 4rem;
+  padding: var(--sp-10) var(--sp-5) var(--sp-12);
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--sp-2);
+}
+
+h1 {
+  font-size: var(--fs-h1);
+  font-weight: 700;
+}
+
+h2 {
+  font-size: var(--fs-h2);
+  font-weight: 600;
+}
+
+p {
+  margin: 0 0 var(--sp-3);
+}
+
+a {
+  color: var(--accent-ink);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: from-font;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+}
+
+/* One focus treatment for everything focusable. Keyboard users get a ring they
+   can actually see against both themes; pointer users do not get it on click. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--r-sm);
+}
+
+::selection {
+  background: var(--accent-soft);
 }
 
 .lede {
-  color: var(--muted);
-  margin-top: -0.35rem;
-  font-size: 1.05rem;
+  color: var(--text-muted);
+  font-size: var(--fs-lead);
+  margin: 0 0 var(--sp-8);
+  max-width: 44rem;
 }
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--card-rule);
-  border-radius: 10px;
-  padding: 1.15rem 1.25rem;
-  margin: 1.1rem 0;
+.fine {
+  color: var(--text-muted);
+  font-size: var(--fs-fine);
 }
 
-.card h2 {
-  margin: 0 0 0.4rem;
-  font-size: 1.05rem;
-  letter-spacing: 0.01em;
+.flush {
+  margin: 0;
 }
 
-.card > p {
-  margin: 0.4rem 0;
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
 }
 
-/* The signed-in bar. Who you are and how to stop being them, on one line. */
+.right {
+  text-align: right;
+}
+
+/* ---------------------------------------------------------------------------
+   The brand mark. A gradient wordmark, used on every page's masthead.
+   --------------------------------------------------------------------------- */
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--accent), var(--brand-grad-end));
+  color: var(--brand-ink);
+  font-size: 0.62em;
+  font-weight: 800;
+  letter-spacing: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.brand-word {
+  background: linear-gradient(100deg, var(--accent), var(--brand-grad-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* A gradient clipped to text has no colour of its own if the clip is not
+   supported, so the fallback is stated first and only overridden where the
+   effect actually works. */
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .brand-word {
+    color: var(--accent-ink);
+    background: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Layout
+   --------------------------------------------------------------------------- */
+
+.wrap {
+  max-width: 54rem;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-8);
+}
+
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--sp-3);
   flex-wrap: wrap;
-  padding-bottom: 0.6rem;
-  border-bottom: 1px solid var(--rule);
 }
+
+.split {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+/* ---------------------------------------------------------------------------
+   Cards
+   --------------------------------------------------------------------------- */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-6);
+  margin-bottom: var(--sp-5);
+  box-shadow: var(--shadow-sm);
+}
+
+/* A hairline of brand along the top edge. Enough to make a card feel placed
+   rather than defaulted, without tinting the surface text sits on. */
+.card.feature {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--accent-soft), transparent 42%), var(--bg-card);
+  border-color: var(--accent-border);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+
+.card-head h2 {
+  margin: 0;
+}
+
+.card > p:last-child {
+  margin-bottom: 0;
+}
+
+section {
+  margin-bottom: var(--sp-6);
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons
+   --------------------------------------------------------------------------- */
 
 .button {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  background: var(--accent);
-  color: var(--accent-fg);
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--r-md);
   border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 0.45rem 0.9rem;
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+  color: var(--accent-text);
   font: inherit;
   font-weight: 600;
   line-height: 1.2;
-  cursor: pointer;
   text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+  box-shadow: var(--shadow-sm);
 }
 
-.button:hover { filter: brightness(1.08); }
-.button:disabled { opacity: 0.55; cursor: default; filter: none; }
+.button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.button:active {
+  transform: translateY(0);
+  background: var(--accent-press);
+}
+
+.button:disabled,
+.button[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
 
 .button.ghost {
-  background: transparent;
-  color: inherit;
-  border-color: var(--card-rule);
-  font-weight: 500;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 
-.button.small { padding: 0.25rem 0.6rem; font-size: 0.85rem; }
-.button.danger { color: var(--danger); border-color: var(--card-rule); }
-.button.danger:hover { background: var(--danger); color: var(--accent-fg); filter: none; }
+.button.ghost:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+}
 
-/* An invite is read once and copied. It gets to be big and selectable. */
+.button.small {
+  padding: 0.3rem 0.7rem;
+  font-size: var(--fs-fine);
+}
+
+.button.danger {
+  color: var(--danger);
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+.button.danger:hover {
+  background: var(--danger);
+  color: var(--danger-ink);
+  border-color: var(--danger);
+}
+
+/* ---------------------------------------------------------------------------
+   Tables
+   --------------------------------------------------------------------------- */
+
+/* A table is the one thing on these pages with an irreducible minimum width,
+   so it gets to scroll sideways inside its own box rather than making the
+   whole page do it. */
+.scroller {
+  overflow-x: auto;
+  margin: 0 calc(-1 * var(--sp-2));
+  padding: 0 var(--sp-2);
+}
+
+table.listing,
+.listing {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-fine);
+}
+
+.listing th {
+  text-align: left;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 0 var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.listing td {
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.listing tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.listing tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* A ROW THAT HIGHLIGHTS ON HOVER IS PROMISING SOMETHING. The two tables on the
+   operator page carry Quota, Delete and Block per row, so the highlight is
+   telling the truth there. The member's own account table carries nothing —
+   an identifier, a count, a size, a date — and highlighting it offers an
+   action that does not exist, which is the same lie as a button that does
+   nothing when clicked, just quieter. */
+.listing.static tbody tr:hover {
+  background: transparent;
+}
+
+.listing td.right {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.listing td.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Numbers worth reading at a glance
+   --------------------------------------------------------------------------- */
+
+.stat {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  display: block;
+  font-size: var(--fs-caption);
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: var(--sp-1);
+}
+
+/* ---------------------------------------------------------------------------
+   Chips, tokens, empty states, messages
+   --------------------------------------------------------------------------- */
+
+.chip {
+  display: inline-block;
+  margin-left: var(--sp-2);
+  padding: 0.1rem 0.55rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.chip.you {
+  color: var(--accent-ink);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.chip.blocked {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* A secret shown once. It reads as something to copy rather than something to
+   skim, and it wraps on any character because a token has no word breaks and
+   must never be silently clipped. */
 .token {
   display: block;
-  background: var(--ok-bg);
-  border: 1px solid var(--card-rule);
-  border-radius: 7px;
-  padding: 0.75rem 0.9rem;
-  margin: 0.7rem 0 0.35rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.95rem;
+  margin: var(--sp-3) 0;
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px dashed var(--accent-border);
+  background: var(--bg-input);
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  line-height: 1.5;
   word-break: break-all;
   user-select: all;
 }
 
-table.listing {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.75rem;
-  font-variant-numeric: tabular-nums;
+/* The first screen a new member sees is the one where they have nothing, so it
+   is the most important screen in the product rather than a leftover state. */
+.empty {
+  padding: var(--sp-8) var(--sp-5);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  text-align: center;
 }
 
-table.listing th {
-  text-align: left;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  font-weight: 600;
-  padding: 0 0.6rem 0.4rem 0;
-  border-bottom: 1px solid var(--rule);
-}
-
-table.listing td {
-  padding: 0.55rem 0.6rem 0.55rem 0;
-  border-bottom: 1px solid var(--rule);
-  vertical-align: middle;
-}
-
-table.listing tr:last-child td { border-bottom: none; }
-table.listing td.right { text-align: right; white-space: nowrap; }
-table.listing td.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9rem;
-}
-
-.chip {
-  display: inline-block;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.1rem 0.45rem;
-  border-radius: 999px;
-  border: 1px solid var(--card-rule);
-  color: var(--muted);
-  margin-left: 0.4rem;
-  vertical-align: 0.06em;
-}
-
-.chip.you { color: var(--accent); border-color: currentColor; }
-.chip.blocked { color: var(--danger); border-color: currentColor; }
-
-.fine { color: var(--muted); font-size: 0.9rem; }
-/* No inline style attribute anywhere — the CSP has no 'unsafe-inline' and a
-   test asserts the markup does not need a weaker one. */
-.flush { margin: 0; }
-
-.notice {
-  background: var(--warn-bg);
-  color: var(--warn-fg);
-  border: 1px solid var(--warn-rule);
-  border-radius: 7px;
-  padding: 0.6rem 0.8rem;
+.notice,
+section.warn {
+  padding: var(--sp-4);
+  border: 1px solid var(--warn);
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  background: var(--warn-soft);
+  color: var(--text);
 }
 
 .problem {
-  background: var(--warn-bg);
-  color: var(--warn-fg);
-  border: 1px solid var(--warn-rule);
-  border-radius: 7px;
-  padding: 0.6rem 0.8rem;
-  margin-top: 1.25rem;
+  padding: var(--sp-4);
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--text);
 }
 
-/* Phone width. The tables are the only thing that cannot simply reflow, so
-   they get their own scroller rather than pushing the page sideways. */
+footer {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-5);
+  margin-top: var(--sp-10);
+  color: var(--text-faint);
+  font-size: var(--fs-fine);
+}
+
+/* ---------------------------------------------------------------------------
+   The paste page. Its own namespace, because a one-time secret is a different
+   kind of page: one state at a time, and nothing else on screen.
+   --------------------------------------------------------------------------- */
+
+main.paste #body {
+  width: 100%;
+  min-height: 12rem;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  line-height: 1.6;
+  resize: vertical;
+}
+
+main.paste input[type='password'] {
+  width: 100%;
+  padding: 0.6rem var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+
+main.paste button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+main.paste button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+main.paste .fine {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Motion and narrow screens
+   --------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .button:hover {
+    transform: none;
+  }
+}
+
 @media (max-width: 34rem) {
-  .wrap { padding: 1.5rem 1rem 3rem; }
-  .scroller { overflow-x: auto; }
-  .row { align-items: flex-start; }
+  main {
+    padding: var(--sp-6) var(--sp-4) var(--sp-10);
+  }
+
+  .card {
+    padding: var(--sp-5) var(--sp-4);
+  }
+
+  .row,
+  .topbar {
+    align-items: flex-start;
+  }
+
+  /* A button that fills the width is easier to hit and stops a row of them
+     wrapping into a ragged stack. */
+  .card > p > .button {
+    width: 100%;
+  }
 }

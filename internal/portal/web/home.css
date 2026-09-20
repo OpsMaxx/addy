@@ -1,0 +1,443 @@
+/* The homepage, and only the homepage.
+   ---------------------------------------------------------------------------
+   portal.css is the design system: the brand tokens, the type scale, .topbar,
+   .brand, .card, .button, .stat, .chip, section.warn, the focus ring and the
+   reduced-motion rule. This file adds the four things that exist on no other
+   page — the hero, the primary-action card's weight, the invite/pair/recover
+   path, and the masthead/footer alignment — and restates none of it.
+
+   RULES THIS FILE KEEPS:
+   - No hex values. Every colour is a portal.css token, so both themes follow
+     from that one file. Dark is the default; light is its override.
+   - `--accent` is a FILL and text on it is `--accent-text`; `--accent-ink` is
+     the accent used AS TEXT on a surface. They diverge in the light theme, so
+     they are never swapped for each other here.
+   - No inline style attribute exists on the page and none may: the CSP has no
+     'unsafe-inline' and a test asserts the markup needs no weaker policy.
+   - Every decorative gradient sits BEHIND text that is already a token colour,
+     or is clipped to text large enough that AA's 3:1 applies. Nothing on this
+     page relies on a gradient for legibility.
+
+   The spacing and radius tokens used here are portal.css's own, spelled the
+   way the OpsMaxx app's token file spells them.
+
+   One trap, having been caught by it: no comment in a stylesheet may contain
+   a star followed by a slash, which a token name written with a wildcard does
+   by accident. It closes the comment early, the following rule is eaten as
+   error recovery, and the page still renders — just without whatever that
+   rule set. It reads as a design choice rather than a parse failure. */
+
+/* The masthead and the footer sit outside <main> so they are real landmarks,
+   which means they do not inherit main's measure or gutters and have to be
+   told. The numbers are main's, from portal.css, phone width included. */
+.topbar,
+.homefoot {
+  max-width: 54rem;
+  margin-inline: auto;
+  padding-inline: var(--sp-5);
+}
+
+.topbar {
+  position: relative;
+  margin-block: 0;
+  padding-block: var(--sp-6) var(--sp-4);
+}
+
+/* A brand hairline under the masthead that fades out rather than stopping, so
+   the page does not open with a hard horizontal line across it. */
+.topbar::after {
+  content: '';
+  position: absolute;
+  inset-inline: var(--sp-5);
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent-border), transparent 60%);
+}
+
+.topbar .brand {
+  margin: 0;
+  font-size: var(--fs-lead);
+}
+
+/* ---------------------------------------------------------------------------
+   The hero. One panel, lit from the top left, carrying the sentence that is
+   the entire reason a person would run one of these.
+   --------------------------------------------------------------------------- */
+
+.home {
+  padding-top: var(--sp-8);
+}
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: var(--sp-10) var(--sp-8) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(120% 140% at 8% -20%, var(--accent-soft), transparent 58%),
+    var(--bg-panel);
+  box-shadow: var(--shadow-md);
+}
+
+/* The lit top edge. One hairline, so the panel reads as a surface catching
+   the same light the glow comes from. */
+.hero {
+  box-shadow:
+    var(--shadow-md),
+    inset 0 1px 0 var(--border-strong);
+}
+
+/* A dot field that dissolves as it falls. Drawn, not fetched: an image here
+   would be a request this page does not need and cannot guarantee. */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background-image: radial-gradient(circle at 1px 1px, var(--border-strong) 1px, transparent 0);
+  background-size: 22px 22px;
+  -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 70%);
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 70%);
+  opacity: 0.7;
+}
+
+/* The glow. It drifts, slowly enough to read as light rather than as motion,
+   and portal.css's prefers-reduced-motion rule stops it for anyone who asked. */
+.hero::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -45%;
+  right: -20%;
+  width: 34rem;
+  height: 34rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-soft), transparent 62%);
+  animation: hero-drift 24s ease-in-out infinite alternate;
+}
+
+@keyframes hero-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    transform: translate3d(-8%, 6%, 0) scale(1.12);
+  }
+}
+
+/* "Relay up" — true by the fact that this page rendered at all, which is the
+   only status a page served by the thing it reports on can honestly give. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-5);
+  padding: 0.25rem 0.7rem 0.25rem 0.55rem;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
+}
+
+.status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 var(--accent-soft);
+  animation: status-pulse 2.6s ease-out infinite;
+}
+
+@keyframes status-pulse {
+  from {
+    box-shadow: 0 0 0 0 var(--accent-border);
+  }
+
+  to {
+    box-shadow: 0 0 0 0.6rem transparent;
+  }
+}
+
+.home h1 {
+  font-size: var(--fs-display);
+  margin-bottom: var(--sp-4);
+  text-wrap: balance;
+}
+
+/* The claim, in brand. Clipped to text this large, so AA's 3:1 for large text
+   is the bar.
+
+   The far stop sits at 135%, past the end of the text, so the run never
+   reaches the full --brand-grad-end value. That end is the darker of the two
+   and, measured against the hero's washed ground at its strongest, it was the
+   weakest contrast on the page at 3.61:1 in the dark theme. Stopping short of
+   it costs nothing visible and buys back most of the margin. */
+.tint {
+  background: linear-gradient(100deg, var(--accent), var(--brand-grad-end) 135%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* A gradient clipped to text has no colour of its own where the clip is not
+   supported, so the solid fallback is what an old browser gets. */
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .tint {
+    background: none;
+    color: var(--accent-ink);
+  }
+}
+
+.hero .lede {
+  margin: 0;
+  max-width: 40rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Sections
+   --------------------------------------------------------------------------- */
+
+/* A section label belongs to what comes AFTER it. Equal space on both sides
+   reads as attached to the card above, so the gap above is roughly four times
+   the gap below and the grouping is not left to the reader to guess. */
+.home > section {
+  margin-top: var(--sp-12);
+  margin-bottom: 0;
+}
+
+/* Section labels are small, so they get a brand rule to find rather than more
+   weight. Decorative: it is announced to nobody and says nothing. */
+.home > section > h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
+}
+
+.home > section > h2::before {
+  content: '';
+  flex: none;
+  width: 1.75rem;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+/* The warning is a box, not a labelled section: it keeps its own heading. */
+.home > section.warn > h2 {
+  display: block;
+  margin-bottom: var(--sp-3);
+  color: var(--text);
+  font-size: var(--fs-h2);
+  letter-spacing: -0.02em;
+  text-transform: none;
+}
+
+.home > section.warn > h2::before {
+  content: none;
+}
+
+.home p {
+  max-width: 40rem;
+}
+
+/* The likeliest arrival gets the largest type after the heading. It is not a
+   button, because what happens next happens in the app and a button here
+   could only lie about that. */
+.act .card {
+  margin-bottom: 0;
+}
+
+.act h2 {
+  color: var(--text);
+  font-size: var(--fs-h2);
+}
+
+.act .big {
+  font-size: clamp(1.1rem, 0.95rem + 0.7vw, 1.4rem);
+  line-height: 1.45;
+  margin-bottom: var(--sp-3);
+  max-width: 34rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Invite -> pair -> recover, as three steps you can see rather than three
+   paragraphs you have to read in order to discover they were steps.
+   .split (portal.css) supplies the auto-fit grid; this adds the numerals.
+   --------------------------------------------------------------------------- */
+
+.path {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  gap: var(--sp-5);
+}
+
+/* The step's own hairline is painted as a background rather than a pseudo
+   element, which frees ::after for the chevron below and lets the line follow
+   the corner radius instead of being clipped square. */
+.path li {
+  counter-increment: step;
+  position: relative;
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background-color: var(--bg-card);
+  background-image: linear-gradient(90deg, var(--accent), var(--brand-grad-end));
+  background-repeat: no-repeat;
+  background-size: 100% 2px;
+  background-position: top left;
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.path li:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-md);
+}
+
+/* The number is ink on an accent FILL, which is the one pairing that is not
+   interchangeable with --accent-ink. */
+.path li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: var(--sp-3);
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--accent), var(--brand-grad-end));
+  color: var(--accent-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-fine);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+.path h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-h2);
+}
+
+.path p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+/* 1 -> 2 -> 3. A chevron in each gap, level with the badges, so the row reads
+   as a path with a direction rather than as three cards that happen to be
+   adjacent. Only while they ARE adjacent: stacked, it would point sideways at
+   nothing. Decorative, so it is drawn and never spoken.
+
+   --accent-ink, not --accent-border: the border token is a 45%-alpha line
+   colour and lands at 1.9:1 against the page, too faint to point anywhere.
+   The ink role is the accent drawn ON a surface, which is what this mark is,
+   and it clears the 3:1 non-text bar in both themes. */
+@media (min-width: 52rem) {
+  .path li:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: calc(var(--sp-5) + 1rem);
+    right: calc(-1 * var(--sp-5) / 2 - 0.3rem);
+    width: 0.5rem;
+    height: 0.5rem;
+    border-top: 2px solid var(--accent-ink);
+    border-right: 2px solid var(--accent-ink);
+    transform: translateY(-50%) rotate(45deg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   What this relay can see. Three answers, none of them a number it made up:
+   they are the same claim the hero makes, said once each.
+   --------------------------------------------------------------------------- */
+
+.facts {
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  list-style: none;
+}
+
+.facts .stat {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 120% at 0% 0%, var(--accent-soft), transparent 60%),
+    var(--bg-elevated);
+}
+
+.facts .stat-value {
+  font-size: clamp(1.35rem, 1.05rem + 1.1vw, 1.8rem);
+}
+
+.facts .stat-label {
+  margin-top: var(--sp-2);
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.45;
+  color: var(--text-muted);
+  font-size: var(--fs-fine);
+}
+
+.ops .card {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Footer
+   --------------------------------------------------------------------------- */
+
+.homefoot {
+  margin-top: var(--sp-10);
+  padding-bottom: var(--sp-10);
+}
+
+/* An empty build line still holds its space, so the footer does not jump when
+   portal.js fills it in — or sit oddly when that fetch fails. */
+.homefoot p {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  min-height: 1.4em;
+}
+
+/* ---------------------------------------------------------------------------
+   Phone. main's gutters narrow in portal.css; the two landmarks that are not
+   main have to follow, or the masthead sits off the text it heads.
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 34rem) {
+  .topbar,
+  .homefoot {
+    padding-inline: var(--sp-4);
+  }
+
+  .topbar::after {
+    inset-inline: var(--sp-4);
+  }
+
+  .hero {
+    padding: var(--sp-6) var(--sp-5) var(--sp-8);
+    border-radius: var(--r-lg);
+  }
+
+  .home > section {
+    margin-top: var(--sp-10);
+  }
+}
