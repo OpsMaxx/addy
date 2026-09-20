@@ -67,6 +67,15 @@
   --danger: #f85149;
   --danger-soft: rgba(248, 81, 73, 0.15);
   --danger-ink: #ffffff;
+  /* THE DANGER RED IS NOT READABLE ON ITS OWN SOFT FILL, so the chip gets a
+     lighter ink than the border and background use. Measured on the real
+     ground — --danger-soft's alpha composited over --bg-card, not the bare
+     token — --danger came to 4.05:1 in this theme and 4.40:1 in the light one,
+     both under the 4.5:1 floor that 12px/600 text has to clear.
+     --accent survives the same construction at 7.33:1, so this is the danger
+     pair specifically and not the chip pattern. This ink measures 6.17:1 dark
+     and 5.73:1 light. */
+  --danger-chip-ink: #ff8f88;
   --ok: #3fb950;
   --ok-soft: rgba(63, 185, 80, 0.15);
 
@@ -153,6 +162,7 @@
   --warn-soft: rgba(154, 103, 0, 0.12);
   --danger: #cf222e;
   --danger-soft: rgba(207, 34, 46, 0.12);
+  --danger-chip-ink: #b3111c;
   --ok: #1a7f37;
   --ok-soft: rgba(26, 127, 55, 0.12);
 
@@ -196,6 +206,7 @@
     --warn-soft: rgba(154, 103, 0, 0.12);
     --danger: #cf222e;
     --danger-soft: rgba(207, 34, 46, 0.12);
+    --danger-chip-ink: #b3111c;
     --ok: #1a7f37;
     --ok-soft: rgba(26, 127, 55, 0.12);
 
@@ -653,7 +664,7 @@ table.listing,
 }
 
 .chip.blocked {
-  color: var(--danger);
+  color: var(--danger-chip-ink);
   border-color: var(--danger);
   background: var(--danger-soft);
 }
