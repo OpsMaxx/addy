@@ -16,10 +16,35 @@ import (
 // with `addy` on the command line. The portal removes the SSH, not a boundary
 // — which is the test any method added later has to pass.
 type Admin interface {
-	NewInvite(ctx context.Context, ttl time.Duration) (string, error)
+	// NewInviteFor mints an invite bound to a person, so the account that
+	// spends it is attributed without anybody claiming it. An empty userID
+	// mints one for nobody, which is right for handing to somebody who has
+	// not signed in.
+	NewInviteFor(ctx context.Context, userID string, ttl time.Duration) (string, error)
 	Accounts(ctx context.Context) ([]AccountView, error)
+	AccountsOf(ctx context.Context, userID string) ([]AccountView, error)
+	Users(ctx context.Context) ([]UserView, error)
 	SetQuota(ctx context.Context, accountID string, bytes int64) error
 	DeleteAccount(ctx context.Context, accountID string) error
+	SetUserBlocked(ctx context.Context, userID string, blocked bool) error
+}
+
+// UserView is a person as the console lists them.
+//
+// Same absence as AccountView, for the same reason: a person has accounts,
+// those accounts hold bytes, and that is everything this relay knows. No
+// device name — the relay holds no key and cannot read one.
+type UserView struct {
+	UserID    string `json:"userId"`
+	Email     string `json:"email"`
+	Name      string `json:"name,omitempty"`
+	CreatedAt string `json:"createdAt"`
+	LastSeen  string `json:"lastSeen,omitempty"`
+	Accounts  int    `json:"accounts"`
+	UsedBytes int64  `json:"usedBytes"`
+	QuotaByte int64  `json:"quotaBytes"`
+	Blocked   bool   `json:"blocked"`
+	Operator  bool   `json:"operator,omitempty"`
 }
 
 // AccountView is what an operator sees, and what they deliberately do not.
@@ -30,6 +55,14 @@ type Admin interface {
 // design spends its length promising it cannot.
 type AccountView struct {
 	AccountID string `json:"accountId"`
+	// The email of whoever owns it, or empty.
+	//
+	// Empty is a real answer and not a lookup failure: an account registered
+	// with an invite that named nobody belongs to nobody until somebody claims
+	// it, and every account created before there were users is in that state.
+	// The page prints a dash rather than "unknown", which would suggest the
+	// relay had lost track of something it never knew.
+	Owner     string `json:"owner,omitempty"`
 	CreatedAt string `json:"createdAt"`
 	Devices   int    `json:"devices"`
 	UsedBytes int64  `json:"usedBytes"`
@@ -103,16 +136,82 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	// deliberately empty when nobody is: it answers "should I show the sign-in
 	// button", and answering that needs no secret.
 	mux.HandleFunc("GET /admin/v1/me", func(w http.ResponseWriter, r *http.Request) {
-		email, ok := a.current(r)
-		writeJSON(w, map[string]any{"signedIn": ok, "email": email})
+		who, ok := a.current(r)
+		writeJSON(w, map[string]any{
+			"signedIn": ok,
+			"email":    who.Email,
+			// The page renders one of two consoles off this. An operator gets
+			// the whole relay; everybody else gets their own space, which is
+			// the same shape with one row in it.
+			"operator": who.Operator,
+			"signup":   string(a.cfg.Signup),
+		})
 	})
 
-	mux.Handle("POST /admin/v1/invite", a.authed(func(w http.ResponseWriter, r *http.Request) {
+	// ---- anybody signed in: their own space --------------------------------
+
+	mux.Handle("GET /admin/v1/my/accounts", a.signedIn(func(w http.ResponseWriter, r *http.Request, who Signed) {
+		list, err := admin.AccountsOf(r.Context(), who.UserID)
+		if err != nil {
+			problem(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, map[string]any{"accounts": list})
+	}))
+
+	mux.Handle("POST /admin/v1/my/invite", a.signedIn(func(w http.ResponseWriter, r *http.Request, who Signed) {
+		// THE POLICY IS ENFORCED HERE, not in the page. A page that hid the
+		// button would be a page somebody could bypass with one fetch.
+		if !who.Operator && a.cfg.Signup != SignupOpen {
+			problem(w, http.StatusForbidden, errors.New(
+				"this relay does not hand out invites; ask whoever runs it for one"))
+			return
+		}
+		token, err := admin.NewInviteFor(r.Context(), who.UserID, 24*time.Hour)
+		if err != nil {
+			problem(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, map[string]any{"invite": token, "hours": 24})
+	}))
+
+	// ---- the operator: the whole relay -------------------------------------
+
+	mux.Handle("GET /admin/v1/users", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
+		list, err := admin.Users(r.Context())
+		if err != nil {
+			problem(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, map[string]any{"users": list})
+	}))
+
+	mux.Handle("POST /admin/v1/users/{id}/blocked", a.operator(func(w http.ResponseWriter, r *http.Request, who Signed) {
+		blocked := r.URL.Query().Get("blocked") != "false"
+		if r.PathValue("id") == who.UserID {
+			// Refused rather than allowed with a warning. An operator who
+			// blocks themselves cannot sign in to unblock themselves, and the
+			// remedy is a SQL statement on the box — which is a bad thing to
+			// need because of one misplaced click.
+			problem(w, http.StatusBadRequest, errors.New("you cannot block yourself"))
+			return
+		}
+		if err := admin.SetUserBlocked(r.Context(), r.PathValue("id"), blocked); err != nil {
+			problem(w, http.StatusInternalServerError, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	mux.Handle("POST /admin/v1/invite", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
 		if hours <= 0 || hours > 24*30 {
 			hours = 24
 		}
-		token, err := admin.NewInvite(r.Context(), time.Duration(hours)*time.Hour)
+		// For nobody in particular: the operator is handing this to somebody
+		// who may not have signed in yet, so the account it creates belongs to
+		// nobody until they do.
+		token, err := admin.NewInviteFor(r.Context(), "", time.Duration(hours)*time.Hour)
 		if err != nil {
 			problem(w, http.StatusInternalServerError, err)
 			return
@@ -122,7 +221,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		writeJSON(w, map[string]any{"invite": token, "hours": hours})
 	}))
 
-	mux.Handle("GET /admin/v1/accounts", a.authed(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /admin/v1/accounts", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		list, err := admin.Accounts(r.Context())
 		if err != nil {
 			problem(w, http.StatusInternalServerError, err)
@@ -131,7 +230,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		writeJSON(w, map[string]any{"accounts": list})
 	}))
 
-	mux.Handle("POST /admin/v1/accounts/{id}/quota", a.authed(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /admin/v1/accounts/{id}/quota", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		bytes, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
 		if err != nil || bytes < 0 {
 			problem(w, http.StatusBadRequest, errors.New("bytes is a non-negative number; 0 means unlimited"))
@@ -144,7 +243,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
-	mux.Handle("DELETE /admin/v1/accounts/{id}", a.authed(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("DELETE /admin/v1/accounts/{id}", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		if err := admin.DeleteAccount(r.Context(), r.PathValue("id")); err != nil {
 			problem(w, http.StatusInternalServerError, err)
 			return
@@ -153,18 +252,35 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	}))
 }
 
-func (a *Auth) current(r *http.Request) (string, bool) {
+func (a *Auth) current(r *http.Request) (Signed, bool) {
 	c, err := r.Cookie(cookieName)
 	if err != nil {
-		return "", false
+		return Signed{}, false
 	}
 	return a.Session(c.Value)
 }
 
-func (a *Auth) authed(next http.HandlerFunc) http.Handler {
+// signedIn admits anybody with a session. operator admits only the person who
+// claimed the relay. TWO MIDDLEWARES rather than a boolean argument, because a
+// boolean at a call site is a thing somebody passes wrongly and nothing
+// notices until an ordinary user can delete an account.
+func (a *Auth) signedIn(next func(http.ResponseWriter, *http.Request, Signed)) http.Handler {
+	return a.guard(false, next)
+}
+
+func (a *Auth) operator(next func(http.ResponseWriter, *http.Request, Signed)) http.Handler {
+	return a.guard(true, next)
+}
+
+func (a *Auth) guard(needOperator bool, next func(http.ResponseWriter, *http.Request, Signed)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := a.current(r); !ok {
+		who, ok := a.current(r)
+		if !ok {
 			problem(w, http.StatusUnauthorized, errors.New("sign in first"))
+			return
+		}
+		if needOperator && !who.Operator {
+			problem(w, http.StatusForbidden, errors.New("only this relay's operator can do that"))
 			return
 		}
 		// A state-changing request has to be same-origin. The session cookie
@@ -178,7 +294,7 @@ func (a *Auth) authed(next http.HandlerFunc) http.Handler {
 				return
 			}
 		}
-		next(w, r)
+		next(w, r, who)
 	})
 }
 

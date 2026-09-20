@@ -44,8 +44,10 @@ use it — this adds no cost and no quota.
 
 **Then leave the publishing status on `Testing` and add yourself as a test
 user.** This is the part worth knowing: a `Testing` app is limited to the test
-users you list, which for a relay with one operator is exactly what you want,
-and it skips Google's verification review entirely. Publishing to `Production`
+users you list — which is a membership list you maintain by hand, and for a
+relay whose users you know is exactly what you want. It also skips Google's
+verification review entirely. If you want anybody at your provider to be able
+to sign in, this is the setting to revisit. Publishing to `Production`
 would mean a review you do not need for an app only you sign in to.
 
 > The seven-day expiry that `Testing` imposes applies to **refresh tokens**.
@@ -112,6 +114,24 @@ Check it worked:
 ```sh
 tr '\0' ' ' < /proc/$(pgrep -x addy)/cmdline | grep -c oidc   # expect 0
 ```
+
+### Who else may sign in
+
+A relay is multi-user. Anybody who signs in through your provider gets their
+own space: their accounts, their device counts, their bytes — and nothing of
+anybody else's. `ADDY_SIGNUP` decides whether they can also help themselves to
+an invite:
+
+| Value | What it means |
+|---|---|
+| `invite` | **The default.** They can sign in and see their own space; an invite still comes from you. |
+| `open` | Anybody who signs in can mint their own invite. Right when the provider already *is* your membership list — Google Workspace `Internal`, or an Okta group. |
+| `closed` | Nobody but you. Others can sign in and will find nothing they can do. |
+
+The policy is enforced on the server, not by hiding a button, so `open` is the
+only setting under which that request succeeds however it is made.
+
+Whoever claimed the relay is its operator and is not subject to this — §5.
 
 **All three flags or none.** With any of them missing, no admin route exists
 at all and the page says to use the `addy` command — an unconfigured console

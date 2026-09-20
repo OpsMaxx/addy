@@ -62,6 +62,9 @@ type Config struct {
 	OIDCIssuer       string
 	OIDCClientID     string
 	OIDCClientSecret string
+	// Who may sign in besides the operator: open, invite or closed. See
+	// operator.SignupPolicy; anything unrecognised becomes `invite`.
+	Signup string
 
 	// The overlay control plane. Off unless HeadscaleURL is set; the API key
 	// is powerful -- it can create and delete nodes, users and keys across the
@@ -275,9 +278,11 @@ func Run(ctx context.Context, cfg Config) error {
 		ClientID:     cfg.OIDCClientID,
 		ClientSecret: cfg.OIDCClientSecret,
 		BaseURL:      operatorBase,
+		Signup:       operator.SignupPolicy(cfg.Signup),
 	}
 	if opCfg.Enabled() {
-		operator.New(opCfg, db).Routes(mux, adminFor(db))
+		admin := adminFor(db)
+		operator.New(opCfg, admin.(operator.Store)).Routes(mux, admin)
 		log.Info("operator portal: sign-in is configured",
 			"issuer", cfg.OIDCIssuer, "redirect", operatorBase+"/admin/callback")
 	} else if cfg.UI {
@@ -492,8 +497,64 @@ type storeAdmin struct{ db *store.DB }
 
 func adminFor(db *store.DB) operator.Admin { return storeAdmin{db} }
 
-func (s storeAdmin) NewInvite(ctx context.Context, ttl time.Duration) (string, error) {
-	return s.db.NewInvite(ctx, ttl)
+// UpsertUser crosses the same seam as the rest of this adapter: the store's
+// User carries more than the sign-in needs, and the operator package should
+// not have to import the store to describe a person.
+func (s storeAdmin) UpsertUser(ctx context.Context, issuer, subject, email, name string) (*operator.User, error) {
+	u, err := s.db.UpsertUser(ctx, issuer, subject, email, name)
+	if err != nil {
+		return nil, err
+	}
+	return &operator.User{UserID: u.UserID, Email: u.Email, Name: u.Name, Blocked: u.Blocked}, nil
+}
+
+func (s storeAdmin) InstanceValue(ctx context.Context, key string) (string, time.Time, error) {
+	return s.db.InstanceValue(ctx, key)
+}
+
+func (s storeAdmin) SetInstanceValue(ctx context.Context, key, value string) error {
+	return s.db.SetInstanceValue(ctx, key, value)
+}
+
+func (s storeAdmin) NewInviteFor(ctx context.Context, userID string, ttl time.Duration) (string, error) {
+	return s.db.NewInviteFor(ctx, userID, ttl)
+}
+
+func (s storeAdmin) SetUserBlocked(ctx context.Context, userID string, blocked bool) error {
+	return s.db.SetUserBlocked(ctx, userID, blocked)
+}
+
+func (s storeAdmin) AccountsOf(ctx context.Context, userID string) ([]operator.AccountView, error) {
+	rows, err := s.db.AccountsOf(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return accountViews(rows), nil
+}
+
+func (s storeAdmin) Users(ctx context.Context) ([]operator.UserView, error) {
+	rows, err := s.db.Users(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]operator.UserView, 0, len(rows))
+	for _, u := range rows {
+		v := operator.UserView{
+			UserID:    u.UserID,
+			Email:     u.Email,
+			Name:      u.Name,
+			CreatedAt: u.CreatedAt.UTC().Format(time.RFC3339),
+			Accounts:  u.Accounts,
+			UsedBytes: u.UsedBytes,
+			QuotaByte: u.QuotaByte,
+			Blocked:   u.Blocked,
+		}
+		if !u.LastSeen.IsZero() {
+			v.LastSeen = u.LastSeen.UTC().Format(time.RFC3339)
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 func (s storeAdmin) SetQuota(ctx context.Context, accountID string, bytes int64) error {
@@ -509,10 +570,15 @@ func (s storeAdmin) Accounts(ctx context.Context) ([]operator.AccountView, error
 	if err != nil {
 		return nil, err
 	}
+	return accountViews(rows), nil
+}
+
+func accountViews(rows []store.AccountSummary) []operator.AccountView {
 	out := make([]operator.AccountView, 0, len(rows))
 	for _, r := range rows {
 		v := operator.AccountView{
 			AccountID: r.AccountID,
+			Owner:     r.OwnerEmail,
 			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
 			Devices:   r.Devices,
 			UsedBytes: r.UsedBytes,
@@ -525,5 +591,5 @@ func (s storeAdmin) Accounts(ctx context.Context) ([]operator.AccountView, error
 		}
 		out = append(out, v)
 	}
-	return out, nil
+	return out
 }

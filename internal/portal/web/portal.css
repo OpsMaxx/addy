@@ -96,3 +96,194 @@ main.paste .fine {
 main.paste [hidden] {
   display: none !important;
 }
+
+/* ---------------------------------------------------------------------------
+   The console.
+   ---------------------------------------------------------------------------
+
+   Same tokens as the rest of the portal, extended rather than replaced: a
+   second palette for the admin pages would mean two things to keep in step and
+   a visible seam at the link between them.
+
+   The layout is deliberately plain. This is a page somebody opens to do one
+   thing — make an invite, look at who is on the relay — and then closes. */
+
+:root {
+  --accent: #2f6f4f;
+  --accent-fg: #ffffff;
+  --card: #ffffff;
+  --card-rule: #e8e8e4;
+  --danger: #8f2f2f;
+  --ok-bg: #edf6f0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #4f9d76;
+    --accent-fg: #0d1512;
+    --card: #1c1c22;
+    --card-rule: #2a2a32;
+    --danger: #d98b8b;
+    --ok-bg: #16231c;
+  }
+}
+
+.wrap {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+.lede {
+  color: var(--muted);
+  margin-top: -0.35rem;
+  font-size: 1.05rem;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-rule);
+  border-radius: 10px;
+  padding: 1.15rem 1.25rem;
+  margin: 1.1rem 0;
+}
+
+.card h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+}
+
+.card > p {
+  margin: 0.4rem 0;
+}
+
+/* The signed-in bar. Who you are and how to stop being them, on one line. */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0.45rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.button:hover { filter: brightness(1.08); }
+.button:disabled { opacity: 0.55; cursor: default; filter: none; }
+
+.button.ghost {
+  background: transparent;
+  color: inherit;
+  border-color: var(--card-rule);
+  font-weight: 500;
+}
+
+.button.small { padding: 0.25rem 0.6rem; font-size: 0.85rem; }
+.button.danger { color: var(--danger); border-color: var(--card-rule); }
+.button.danger:hover { background: var(--danger); color: var(--accent-fg); filter: none; }
+
+/* An invite is read once and copied. It gets to be big and selectable. */
+.token {
+  display: block;
+  background: var(--ok-bg);
+  border: 1px solid var(--card-rule);
+  border-radius: 7px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.7rem 0 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95rem;
+  word-break: break-all;
+  user-select: all;
+}
+
+table.listing {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+table.listing th {
+  text-align: left;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0 0.6rem 0.4rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+table.listing td {
+  padding: 0.55rem 0.6rem 0.55rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+
+table.listing tr:last-child td { border-bottom: none; }
+table.listing td.right { text-align: right; white-space: nowrap; }
+table.listing td.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--card-rule);
+  color: var(--muted);
+  margin-left: 0.4rem;
+  vertical-align: 0.06em;
+}
+
+.chip.you { color: var(--accent); border-color: currentColor; }
+.chip.blocked { color: var(--danger); border-color: currentColor; }
+
+.fine { color: var(--muted); font-size: 0.9rem; }
+/* No inline style attribute anywhere — the CSP has no 'unsafe-inline' and a
+   test asserts the markup does not need a weaker one. */
+.flush { margin: 0; }
+
+.notice {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-rule);
+  border-radius: 7px;
+  padding: 0.6rem 0.8rem;
+}
+
+.problem {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border: 1px solid var(--warn-rule);
+  border-radius: 7px;
+  padding: 0.6rem 0.8rem;
+  margin-top: 1.25rem;
+}
+
+/* Phone width. The tables are the only thing that cannot simply reflow, so
+   they get their own scroller rather than pushing the page sideways. */
+@media (max-width: 34rem) {
+  .wrap { padding: 1.5rem 1rem 3rem; }
+  .scroller { overflow-x: auto; }
+  .row { align-items: flex-start; }
+}

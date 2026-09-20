@@ -25,11 +25,15 @@ import (
 // a last-seen time, which is what the threat model concedes the server knows.
 type AccountSummary struct {
 	AccountID string
-	CreatedAt time.Time
-	Devices   int
-	UsedBytes int64
-	QuotaByte int64 // zero means unlimited
-	LastSeen  time.Time
+	// Whoever owns it, or "" for an account nobody has claimed — which is
+	// every account registered with an invite that named nobody, and every
+	// account that predates the users table.
+	OwnerEmail string
+	CreatedAt  time.Time
+	Devices    int
+	UsedBytes  int64
+	QuotaByte  int64 // zero means unlimited
+	LastSeen   time.Time
 }
 
 // Accounts lists every account, for the admin view.
@@ -39,7 +43,10 @@ func (d *DB) Accounts(ctx context.Context) ([]AccountSummary, error) {
 		       (SELECT count(*) FROM roster_entries r WHERE r.account_id = a.account_id),
 		       coalesce((SELECT sum(length(body)) FROM objects o WHERE o.account_id = a.account_id), 0)
 		     + coalesce((SELECT sum(length(wire)) FROM roster_entries r WHERE r.account_id = a.account_id), 0),
-		       coalesce((SELECT max(updated_at) FROM objects o WHERE o.account_id = a.account_id), 0)
+		       coalesce((SELECT max(updated_at) FROM objects o WHERE o.account_id = a.account_id), 0),
+		       coalesce((SELECT u.email FROM account_owners w
+		                   JOIN users u ON u.user_id = w.user_id
+		                  WHERE w.account_id = a.account_id), '')
 		  FROM accounts a
 		 ORDER BY a.created_at`)
 	if err != nil {
@@ -52,7 +59,8 @@ func (d *DB) Accounts(ctx context.Context) ([]AccountSummary, error) {
 		var s AccountSummary
 		var created, lastSeen int64
 		var entries int
-		if err := rows.Scan(&s.AccountID, &created, &s.QuotaByte, &entries, &s.UsedBytes, &lastSeen); err != nil {
+		if err := rows.Scan(&s.AccountID, &created, &s.QuotaByte, &entries,
+			&s.UsedBytes, &lastSeen, &s.OwnerEmail); err != nil {
 			return nil, fmt.Errorf("store: scanning an account: %w", err)
 		}
 		s.CreatedAt = time.Unix(created, 0)

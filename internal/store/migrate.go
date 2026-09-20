@@ -213,6 +213,59 @@ var migrations = []string{
 	// otherwise be a full table walk on a timer.
 	`CREATE INDEX mailbox_delivery ON mailbox (account_id, to_device, id)`,
 	`CREATE INDEX mailbox_sweep ON mailbox (expires_at)`,
+
+	// 6. People.
+	//
+	// A RELAY IS MULTI-USER BY DESIGN and until now it could not name anybody:
+	// accounts existed, invites existed, and nothing connected either to a
+	// person. So an operator looking at four accounts could not tell whose
+	// they were, and a user could not sign in at all — every account had to be
+	// handed out by the operator minting a token over SSH.
+	//
+	// Identity is (issuer, subject), never email. An email address is a
+	// display name that providers let people change and reuse; a subject is
+	// the identifier the provider promises is stable and unique, and it is
+	// only unique WITHIN its issuer — so both halves, always, exactly as the
+	// operator claim already does.
+	//
+	// `email` is stored anyway because it is what a human reads in a list, and
+	// refreshed on every sign-in so a changed address does not leave the
+	// console showing an old one for ever.
+	`CREATE TABLE users (
+		user_id    TEXT PRIMARY KEY,
+		issuer     TEXT NOT NULL,
+		subject    TEXT NOT NULL,
+		email      TEXT NOT NULL DEFAULT '',
+		name       TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		last_seen  INTEGER NOT NULL DEFAULT 0,
+		quota_bytes INTEGER NOT NULL DEFAULT 0,
+		blocked_at INTEGER,
+		UNIQUE (issuer, subject)
+	)`,
+
+	// Which person an account belongs to.
+	//
+	// A SEPARATE TABLE rather than a column on `accounts`, because the
+	// relationship is not one the account knows about: an account is created
+	// by a device holding a root key, and the only thing tying it to a person
+	// is the invite it was registered with. Keeping that link here means
+	// `accounts` stays exactly what the protocol says it is, and a relay whose
+	// users table was dropped would still serve every account correctly.
+	`CREATE TABLE account_owners (
+		account_id TEXT PRIMARY KEY REFERENCES accounts(account_id) ON DELETE CASCADE,
+		user_id    TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+		linked_at  INTEGER NOT NULL
+	)`,
+	`CREATE INDEX account_owners_by_user ON account_owners (user_id)`,
+
+	// An invite now remembers who it was minted for, so the account that
+	// spends it can be attributed without the spender claiming anything.
+	//
+	// NULL for an invite the operator minted without naming anybody, which is
+	// still the right thing for handing one to somebody who has not signed in
+	// — the account then belongs to nobody until it does.
+	`ALTER TABLE invites ADD COLUMN minted_for TEXT REFERENCES users(user_id)`,
 }
 
 func (d *DB) migrate(ctx context.Context) error {

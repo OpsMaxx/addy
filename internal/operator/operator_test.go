@@ -55,11 +55,15 @@ func newIDP(t *testing.T, subject, email string) *fakeIDP {
 
 // An in-memory instance table.
 type memStore struct {
-	mu sync.Mutex
-	kv map[string]string
+	mu      sync.Mutex
+	kv      map[string]string
+	users   map[string]*User
+	blocked map[string]bool
 }
 
-func newStore() *memStore { return &memStore{kv: map[string]string{}} }
+func newStore() *memStore {
+	return &memStore{kv: map[string]string{}, users: map[string]*User{}, blocked: map[string]bool{}}
+}
 
 func (m *memStore) InstanceValue(_ context.Context, key string) (string, time.Time, error) {
 	m.mu.Lock()
@@ -72,6 +76,24 @@ func (m *memStore) SetInstanceValue(_ context.Context, key, value string) error 
 	defer m.mu.Unlock()
 	m.kv[key] = value
 	return nil
+}
+
+// Everybody who signs in becomes a user, operator included — an operator is a
+// user who also claimed the relay, not a separate kind of thing.
+func (m *memStore) UpsertUser(_ context.Context, issuer, subject, email, name string) (*User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := issuer + "\x00" + subject
+	if m.users == nil {
+		m.users = map[string]*User{}
+	}
+	if u, ok := m.users[k]; ok {
+		u.Email, u.Name = email, name
+		return u, nil
+	}
+	u := &User{UserID: "u-" + subject, Email: email, Name: name, Blocked: m.blocked[k]}
+	m.users[k] = u
+	return u, nil
 }
 
 func authFor(t *testing.T, idp *fakeIDP, store Store) *Auth {
@@ -159,10 +181,18 @@ func TestTheFirstSignInClaimsTheRelayAndTheSecondPersonIsRefused(t *testing.T) {
 		UserinfoEndpoint:      stranger.server.URL + "/userinfo",
 	}
 
-	if _, err := signIn(t, strangerAuth); err == nil {
-		t.Fatal("a second person signed in to a relay somebody else had claimed")
-	} else if !strings.Contains(err.Error(), "already has an operator") {
-		t.Fatalf("refused for the wrong reason: %v", err)
+	// A RELAY IS MULTI-USER, so somebody else signing in is an ordinary user
+	// rather than an intruder. What the claim decides is who gets the CONSOLE.
+	sid, err := signIn(t, strangerAuth)
+	if err != nil {
+		t.Fatalf("a second person could not sign in at all: %v", err)
+	}
+	who, ok := strangerAuth.Session(sid)
+	if !ok {
+		t.Fatal("the second person got no session")
+	}
+	if who.Operator {
+		t.Fatal("a second person was made operator of a relay somebody else had claimed")
 	}
 
 	// And the owner can still sign in again, or the claim would be a lockout
@@ -183,8 +213,17 @@ func TestTheSameIdentifierAtADifferentProviderIsNotTheSamePerson(t *testing.T) {
 	}
 
 	second := newIDP(t, "1234567890", "b@elsewhere.example")
-	if _, err := signIn(t, authFor(t, second, store)); err == nil {
-		t.Fatal("the same subject at a different issuer was treated as the same person")
+	sid, err := signIn(t, authFor(t, second, store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	who, _ := authFor(t, second, store).Session(sid)
+	_ = who
+	// The claim is stored as issuer AND subject, so the same identifier at a
+	// different issuer is a different person and does not inherit the console.
+	held := store.kv[OperatorKey]
+	if !strings.HasPrefix(held, first.server.URL+"\x00") {
+		t.Fatalf("the claim moved to the second issuer: %q", held)
 	}
 }
 
@@ -293,3 +332,137 @@ func TestAnUnauthenticatedCallerReachesNothingButMe(t *testing.T) {
 		}
 	}
 }
+
+func TestTheSignupPolicyDecidesWhoGetsAnInvite(t *testing.T) {
+	// A relay is multi-user by design, and until there was a policy there was
+	// no honest default: open would mean every account at the provider getting
+	// space on somebody's private box, closed would mean the multi-user half
+	// of the product being unreachable. So it is a decision, and it is
+	// enforced HERE rather than by the page hiding a button — a hidden button
+	// is one anybody bypasses with a single fetch.
+	for _, c := range []struct {
+		policy SignupPolicy
+		user   int // what an ordinary user gets from POST /admin/v1/my/invite
+		op     int // what the operator gets
+	}{
+		{SignupOpen, http.StatusOK, http.StatusOK},
+		{SignupInvite, http.StatusForbidden, http.StatusOK},
+	} {
+		store := newStore()
+		owner := newIDP(t, "the-owner", "owner@example.com")
+
+		opAuth := New(Config{
+			Issuer: owner.server.URL, ClientID: "cid", ClientSecret: "s",
+			BaseURL: "https://relay.example", Signup: c.policy,
+		}, store)
+		opAuth.http = owner.server.Client()
+
+		opSid, err := signIn(t, opAuth)
+		if err != nil {
+			t.Fatalf("%s: the operator could not sign in: %v", c.policy, err)
+		}
+
+		other := newIDP(t, "somebody-else", "other@example.com")
+		userAuth := New(Config{
+			Issuer: owner.server.URL, ClientID: "cid", ClientSecret: "s",
+			BaseURL: "https://relay.example", Signup: c.policy,
+		}, store)
+		userAuth.http = other.server.Client()
+		userAuth.found = &discovery{
+			AuthorizationEndpoint: other.server.URL + "/auth",
+			TokenEndpoint:         other.server.URL + "/token",
+			UserinfoEndpoint:      other.server.URL + "/userinfo",
+		}
+		userSid, err := signIn(t, userAuth)
+		if err != nil {
+			t.Fatalf("%s: an ordinary user could not sign in: %v", c.policy, err)
+		}
+
+		mux := http.NewServeMux()
+		opAuth.Routes(mux, stubAdmin{})
+
+		for _, who := range []struct {
+			name string
+			sid  string
+			want int
+		}{{"user", userSid, c.user}, {"operator", opSid, c.op}} {
+			req := httptest.NewRequest(http.MethodPost, "/admin/v1/my/invite", nil)
+			req.AddCookie(&http.Cookie{Name: cookieName, Value: who.sid})
+			rec := httptest.NewRecorder()
+			// Both sessions live in opAuth's map, so route through it.
+			if who.name == "user" {
+				opAuth.mu.Lock()
+				opAuth.sessions[key(who.sid)] = userAuth.sessions[key(who.sid)]
+				opAuth.mu.Unlock()
+			}
+			mux.ServeHTTP(rec, req)
+			if rec.Code != who.want {
+				t.Fatalf("%s policy, %s asking for an invite: got %d want %d (%s)",
+					c.policy, who.name, rec.Code, who.want, rec.Body.String())
+			}
+		}
+	}
+}
+
+func TestAnOrdinaryUserCannotReachTheOperatorRoutes(t *testing.T) {
+	// Two middlewares rather than a boolean argument, because a boolean at a
+	// call site is a thing somebody passes wrongly and nothing notices until an
+	// ordinary user can delete somebody's account.
+	store := newStore()
+	owner := newIDP(t, "the-owner", "owner@example.com")
+	a := New(Config{
+		Issuer: owner.server.URL, ClientID: "cid", ClientSecret: "s",
+		BaseURL: "https://relay.example", Signup: SignupOpen,
+	}, store)
+	a.http = owner.server.Client()
+	if _, err := signIn(t, a); err != nil {
+		t.Fatal(err)
+	}
+
+	// Forge a session for somebody who is not the operator, which is exactly
+	// what a second person signing in produces.
+	a.mu.Lock()
+	a.sessions[key("user-session")] = session{userID: "u-2", email: "x@example.com", operator: false, expires: a.now().Add(time.Hour)}
+	a.mu.Unlock()
+
+	mux := http.NewServeMux()
+	a.Routes(mux, stubAdmin{})
+
+	for _, c := range []struct{ method, path string }{
+		{http.MethodGet, "/admin/v1/accounts"},
+		{http.MethodGet, "/admin/v1/users"},
+		{http.MethodPost, "/admin/v1/invite"},
+		{http.MethodDelete, "/admin/v1/accounts/abc"},
+		{http.MethodPost, "/admin/v1/users/u-1/blocked"},
+	} {
+		req := httptest.NewRequest(c.method, c.path, nil)
+		req.AddCookie(&http.Cookie{Name: cookieName, Value: "user-session"})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s %s as an ordinary user answered %d; want 403", c.method, c.path, rec.Code)
+		}
+	}
+
+	// And their own space still works, or the separation would just be a wall.
+	req := httptest.NewRequest(http.MethodGet, "/admin/v1/my/accounts", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: "user-session"})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("an ordinary user could not see their own accounts: %d", rec.Code)
+	}
+}
+
+// stubAdmin answers everything successfully and remembers nothing.
+type stubAdmin struct{}
+
+func (stubAdmin) NewInviteFor(context.Context, string, time.Duration) (string, error) {
+	return "an-invite", nil
+}
+func (stubAdmin) Accounts(context.Context) ([]AccountView, error)           { return nil, nil }
+func (stubAdmin) AccountsOf(context.Context, string) ([]AccountView, error) { return nil, nil }
+func (stubAdmin) Users(context.Context) ([]UserView, error)                 { return nil, nil }
+func (stubAdmin) SetQuota(context.Context, string, int64) error             { return nil }
+func (stubAdmin) DeleteAccount(context.Context, string) error               { return nil }
+func (stubAdmin) SetUserBlocked(context.Context, string, bool) error        { return nil }

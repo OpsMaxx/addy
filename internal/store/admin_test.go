@@ -24,6 +24,16 @@ func TestTheAdminViewCannotCarryContent(t *testing.T) {
 		"UsedBytes": true,
 		"QuotaByte": true,
 		"LastSeen":  true,
+		// The email the person signed in with, which this server necessarily
+		// has: it recorded that sign-in, and an operator who cannot tell whose
+		// account is whose cannot run a multi-user relay at all.
+		//
+		// It is IDENTITY, which is inside the boundary, rather than CONTENT,
+		// which is not. The test to apply to a field proposed here is whether
+		// the server could have learned it without a key — this one it
+		// learned from the identity provider, and a device label it could
+		// never learn at all.
+		"OwnerEmail": true,
 	}
 	typ := reflect.TypeOf(AccountSummary{})
 	for i := 0; i < typ.NumField(); i++ {

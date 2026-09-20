@@ -66,6 +66,19 @@ const OperatorKey = "operator_identity"
 type Store interface {
 	InstanceValue(ctx context.Context, key string) (string, time.Time, error)
 	SetInstanceValue(ctx context.Context, key, value string) error
+	// UpsertUser records the sign-in. Everybody who signs in becomes a user,
+	// INCLUDING the operator — an operator is a user who also claimed the
+	// relay, not a separate kind of thing, so their own space works like
+	// anybody else's.
+	UpsertUser(ctx context.Context, issuer, subject, email, name string) (*User, error)
+}
+
+// User is the part of a store user this package needs.
+type User struct {
+	UserID  string
+	Email   string
+	Name    string
+	Blocked bool
 }
 
 // Config is the provider, as the operator configured it.
@@ -80,6 +93,38 @@ type Config struct {
 	ClientSecret string
 	// The public origin this relay answers on, for building the redirect URI.
 	BaseURL string
+	// Whether somebody who is not the operator may sign in and get a space.
+	Signup SignupPolicy
+}
+
+// SignupPolicy decides what happens when a person who is not the operator
+// signs in.
+//
+// A RELAY IS MULTI-USER BY DESIGN — the design says so and the store has
+// always had room for it — but until there was a policy there was no honest
+// default: open would have meant every account at the provider getting space
+// on somebody's private box, and closed would have meant the multi-user half
+// of the product being unreachable.
+//
+// So it is a decision the operator makes, and `invite` is the default because
+// it is the one that surprises nobody: people can sign in and see their own
+// space, and an account still needs an invite the operator handed over.
+type SignupPolicy string
+
+const (
+	// SignupOpen: anybody who can sign in gets an invite on request. Right for
+	// a relay run for a team whose provider is already the membership list —
+	// with Google Workspace `Internal`, "anybody at the provider" IS the team.
+	SignupOpen SignupPolicy = "open"
+	// SignupInvite: people can sign in and see their space, and an invite has
+	// to come from the operator. The default.
+	SignupInvite SignupPolicy = "invite"
+	// SignupClosed: nobody but the operator signs in at all.
+	SignupClosed SignupPolicy = "closed"
+)
+
+func (p SignupPolicy) valid() bool {
+	return p == SignupOpen || p == SignupInvite || p == SignupClosed
 }
 
 // Enabled reports whether an operator portal should exist at all.
@@ -89,6 +134,18 @@ type Config struct {
 // that authenticated nobody would be worse than no portal.
 func (c Config) Enabled() bool {
 	return c.Issuer != "" && c.ClientID != "" && c.ClientSecret != "" && c.BaseURL != ""
+}
+
+// Normalised returns the config with a usable signup policy.
+//
+// An unset or misspelled policy becomes `invite`, the default — rather than
+// the zero value, which would be an empty string matching nothing and
+// silently behaving like `closed`.
+func (c Config) Normalised() Config {
+	if !c.Signup.valid() {
+		c.Signup = SignupInvite
+	}
+	return c
 }
 
 type discovery struct {
@@ -122,15 +179,31 @@ type pendingLogin struct {
 }
 
 type session struct {
-	subject string
-	email   string
-	expires time.Time
+	subject  string
+	email    string
+	userID   string
+	operator bool
+	expires  time.Time
 }
 
-// Sessions live in memory ON PURPOSE. A restart signs the operator out, which
-// for an administrative surface is the correct behaviour rather than a cost:
-// the box was restarted and whoever is holding a cookie should prove who they
-// are again.
+// Who is signed in, as the routes need them.
+type Signed struct {
+	UserID   string
+	Email    string
+	Operator bool
+}
+
+// Sessions live in memory ON PURPOSE. A restart signs everybody out, which for
+// an administrative surface is the correct behaviour rather than a cost: the
+// box was restarted and whoever is holding a cookie should prove who they are
+// again.
+//
+// THE PAGE HAS TO HANDLE IT, and that is the part that was missing rather than
+// the choice. An upgrade ends every session, so a tab left open goes on
+// showing a signed-in console over a server that has never heard of it — and
+// the first thing clicked answers "sign in first", at the bottom of a page
+// that says who you are signed in as. The console now treats a 401 from
+// anywhere as the session having ended and says so.
 const sessionTTL = 8 * time.Hour
 
 // A login that is not completed promptly is one that was abandoned, or one
@@ -139,7 +212,7 @@ const pendingTTL = 10 * time.Minute
 
 func New(cfg Config, store Store) *Auth {
 	return &Auth{
-		cfg:      cfg,
+		cfg:      cfg.Normalised(),
 		store:    store,
 		now:      time.Now,
 		http:     &http.Client{Timeout: 15 * time.Second},
@@ -290,8 +363,24 @@ func (a *Auth) Complete(ctx context.Context, state, code string) (string, error)
 		return "", errors.New("operator: the provider returned no subject")
 	}
 
-	if err := a.claimOrCheck(ctx, who.Subject); err != nil {
+	isOperator, err := a.claimOrCheck(ctx, who.Subject)
+	if err != nil {
 		return "", err
+	}
+	if !isOperator && a.cfg.Signup == SignupClosed {
+		// Said as a policy rather than as a failure: the person did nothing
+		// wrong, this relay is simply not taking sign-ins.
+		return "", errors.New("this relay is not open for sign-in; ask whoever runs it")
+	}
+
+	user, err := a.store.UpsertUser(ctx, a.cfg.Issuer, who.Subject, who.Email, who.Name)
+	if err != nil {
+		return "", err
+	}
+	if user.Blocked {
+		// Distinct from "not open", because only one of the two is worth
+		// contacting somebody about.
+		return "", errors.New("this account has been blocked on this relay")
 	}
 
 	sid, err := randomToken()
@@ -299,7 +388,13 @@ func (a *Auth) Complete(ctx context.Context, state, code string) (string, error)
 		return "", err
 	}
 	a.mu.Lock()
-	a.sessions[key(sid)] = session{subject: who.Subject, email: who.Email, expires: a.now().Add(sessionTTL)}
+	a.sessions[key(sid)] = session{
+		subject:  who.Subject,
+		email:    who.Email,
+		userID:   user.UserID,
+		operator: isOperator,
+		expires:  a.now().Add(sessionTTL),
+	}
 	a.mu.Unlock()
 	return sid, nil
 }
@@ -332,40 +427,41 @@ func (a *Auth) userinfo(ctx context.Context, endpoint, accessToken string) (*ide
 // anyone with an account at the configured provider being an admin — is not a
 // decision anybody would make on purpose. Configuring Google without this
 // would make every Google account in the world an operator of the relay.
-func (a *Auth) claimOrCheck(ctx context.Context, subject string) error {
+// It answers whether this person IS the operator, rather than refusing
+// everybody else: a relay is multi-user, so somebody who is not the operator
+// is an ordinary user rather than an intruder. What the claim decides is who
+// gets the console, not who gets in.
+func (a *Auth) claimOrCheck(ctx context.Context, subject string) (bool, error) {
 	want := a.cfg.Issuer + "\x00" + subject
 
 	held, _, err := a.store.InstanceValue(ctx, OperatorKey)
 	if err != nil {
-		return fmt.Errorf("operator: reading the claim: %w", err)
+		return false, fmt.Errorf("operator: reading the claim: %w", err)
 	}
 	if held == "" {
 		if err := a.store.SetInstanceValue(ctx, OperatorKey, want); err != nil {
-			return fmt.Errorf("operator: claiming this relay: %w", err)
+			return false, fmt.Errorf("operator: claiming this relay: %w", err)
 		}
-		return nil
+		return true, nil
 	}
 	// Constant time, because this compares an identifier an attacker can vary
 	// against one they are trying to learn.
-	if subtle.ConstantTimeCompare([]byte(held), []byte(want)) != 1 {
-		return errors.New("this relay already has an operator, and it is not this account")
-	}
-	return nil
+	return subtle.ConstantTimeCompare([]byte(held), []byte(want)) == 1, nil
 }
 
 // Session returns who is signed in, or false.
-func (a *Auth) Session(sid string) (string, bool) {
+func (a *Auth) Session(sid string) (Signed, bool) {
 	if sid == "" {
-		return "", false
+		return Signed{}, false
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sweepLocked()
 	s, ok := a.sessions[key(sid)]
 	if !ok || a.now().After(s.expires) {
-		return "", false
+		return Signed{}, false
 	}
-	return s.email, true
+	return Signed{UserID: s.userID, Email: s.email, Operator: s.operator}, true
 }
 
 // End signs one session out.

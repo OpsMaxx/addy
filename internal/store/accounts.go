@@ -48,9 +48,12 @@ func (d *DB) CreateAccount(ctx context.Context, accountID string, rootSignPub []
 		hash := hashToken(inviteToken)
 		var expires int64
 		var spentBy sql.NullString
+		// Who the invite was minted for, so the account it creates can be
+		// attributed without the registrant claiming anything.
+		var mintedFor sql.NullString
 		err := tx.QueryRowContext(ctx,
-			`SELECT expires_at, spent_by FROM invites WHERE token_hash = ?`, hash).
-			Scan(&expires, &spentBy)
+			`SELECT expires_at, spent_by, minted_for FROM invites WHERE token_hash = ?`, hash).
+			Scan(&expires, &spentBy, &mintedFor)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrInviteUnknown
 		}
@@ -75,6 +78,26 @@ func (d *DB) CreateAccount(ctx context.Context, accountID string, rootSignPub []
 			`UPDATE invites SET spent_by = ?, spent_at = ? WHERE token_hash = ?`,
 			accountID, now, hash); err != nil {
 			return fmt.Errorf("store: spending the invite: %w", err)
+		}
+
+		// WHOSE ACCOUNT THIS IS, taken from the invite rather than from the
+		// device registering.
+		//
+		// The device presents a token and the token already says who it was
+		// minted for, so attribution needs nobody to be believed. A registrant
+		// that named its own owner would be one this relay had to trust about
+		// a thing it has every reason to lie about.
+		//
+		// NULL for an invite the operator minted without naming anybody, which
+		// is the right thing for one handed to somebody who has not signed in:
+		// the account then belongs to nobody until it does.
+		if mintedFor.Valid {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO account_owners (account_id, user_id, linked_at) VALUES (?, ?, ?)
+				 ON CONFLICT(account_id) DO NOTHING`,
+				accountID, mintedFor.String, time.Now().UnixMilli()); err != nil {
+				return fmt.Errorf("store: attributing the account: %w", err)
+			}
 		}
 		return nil
 	})
