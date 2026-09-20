@@ -559,6 +559,14 @@ table.listing,
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-fine);
+  /* THE SCROLLER ABOVE IS USELESS WITHOUT THIS. `.scroller` says a table may
+     scroll sideways rather than make the page do it, but a table with no
+     minimum width never gets wide enough to scroll — it squeezes instead, and
+     the columns that give first are the short ones. The visible result was a
+     byte total breaking as "46" / "MB" across two lines, which reads as two
+     values rather than one. Below this width the table scrolls, which is what
+     the surrounding box was always for. */
+  min-width: 32rem;
 }
 
 .listing th {
@@ -599,6 +607,12 @@ table.listing,
 
 .listing td.right {
   text-align: right;
+  white-space: nowrap;
+}
+
+/* A measurement never breaks across lines. Only the person column, which holds
+   an address and may hold a chip beside it, is allowed to wrap. */
+.listing td + td {
   white-space: nowrap;
 }
 
