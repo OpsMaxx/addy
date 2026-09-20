@@ -516,12 +516,34 @@ func (s storeAdmin) SetInstanceValue(ctx context.Context, key, value string) err
 	return s.db.SetInstanceValue(ctx, key, value)
 }
 
+// translate turns a store sentinel into the operator one that carries a status
+// code. THE SEAM IS THE RIGHT PLACE FOR IT: the operator package deliberately
+// does not import the store, so it cannot compare against the store's errors,
+// and without this every anticipated refusal reached the browser as a 500 with
+// the store's internal layering in the body.
+//
+// Errors that match neither are returned unchanged and become a 500, which is
+// what an unanticipated failure should be.
+func translate(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, store.ErrNoAccount), errors.Is(err, store.ErrNoUser):
+		return fmt.Errorf("%w: %w", operator.ErrNotFound, err)
+	case errors.Is(err, store.ErrBlocked):
+		return fmt.Errorf("%w: %w", operator.ErrBlocked, err)
+	default:
+		return err
+	}
+}
+
 func (s storeAdmin) NewInviteFor(ctx context.Context, userID string, ttl time.Duration) (string, error) {
-	return s.db.NewInviteFor(ctx, userID, ttl)
+	token, err := s.db.NewInviteFor(ctx, userID, ttl)
+	return token, translate(err)
 }
 
 func (s storeAdmin) SetUserBlocked(ctx context.Context, userID string, blocked bool) error {
-	return s.db.SetUserBlocked(ctx, userID, blocked)
+	return translate(s.db.SetUserBlocked(ctx, userID, blocked))
 }
 
 func (s storeAdmin) AccountsOf(ctx context.Context, userID string) ([]operator.AccountView, error) {
@@ -558,11 +580,11 @@ func (s storeAdmin) Users(ctx context.Context) ([]operator.UserView, error) {
 }
 
 func (s storeAdmin) SetQuota(ctx context.Context, accountID string, bytes int64) error {
-	return s.db.SetQuota(ctx, accountID, bytes)
+	return translate(s.db.SetQuota(ctx, accountID, bytes))
 }
 
 func (s storeAdmin) DeleteAccount(ctx context.Context, accountID string) error {
-	return s.db.DeleteAccount(ctx, accountID)
+	return translate(s.db.DeleteAccount(ctx, accountID))
 }
 
 func (s storeAdmin) Accounts(ctx context.Context) ([]operator.AccountView, error) {

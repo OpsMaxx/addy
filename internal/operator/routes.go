@@ -4,11 +4,48 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html/template"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// THE STATUS CODE IS PART OF THE CONTRACT, so the HTTP layer needs to tell a
+// missing row from a refusal from a genuine fault. It cannot import the store
+// to compare sentinels — the whole point of the Admin interface is that this
+// package does not know what is behind it — so the seam translates instead,
+// and these are what it translates into. An error matching neither is a 500,
+// which is the right answer for something nobody anticipated.
+var (
+	// ErrNotFound is a row that is not there. A 404, not a 500: an operator
+	// clicking Block on a row another tab already deleted has made an ordinary
+	// mistake, not triggered a server fault.
+	ErrNotFound = errors.New("operator: no such thing")
+	// ErrBlocked is a person the operator has switched off. A 403 carrying the
+	// reason, not a 500 carrying the store's internal layering.
+	ErrBlocked = errors.New("operator: that account is blocked")
+)
+
+// fault maps an error to the status code that describes it, and to a sentence
+// written for whoever reads it.
+//
+// The raw error goes out only for the codes that mean "this relay is broken".
+// For the two anticipated cases it does not, because those strings are built
+// for a maintainer: a blocked person was shown
+// "store: storing the invite: store: that user is blocked", which names three
+// layers and no remedy.
+func fault(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		problem(w, http.StatusNotFound, errors.New("there is nothing here by that name; it may have been deleted"))
+	case errors.Is(err, ErrBlocked):
+		problem(w, http.StatusForbidden, errors.New("this account has been blocked on this relay; ask whoever runs it"))
+	default:
+		problem(w, http.StatusInternalServerError, err)
+	}
+}
 
 // Admin is what the portal can do once somebody is signed in.
 //
@@ -85,7 +122,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	mux.HandleFunc("GET /admin/login", func(w http.ResponseWriter, r *http.Request) {
 		where, err := a.Start(r.Context())
 		if err != nil {
-			problem(w, http.StatusBadGateway, err)
+			turnedAway(w, http.StatusBadGateway, err)
 			return
 		}
 		http.Redirect(w, r, where, http.StatusFound)
@@ -97,12 +134,12 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 			// The provider's own refusal, shown as itself. "Something went
 			// wrong" would leave somebody unable to tell a cancelled sign-in
 			// from a misconfigured client id.
-			problem(w, http.StatusForbidden, errors.New("the provider refused the sign-in: "+e))
+			turnedAway(w, http.StatusForbidden, errors.New("the provider refused the sign-in: "+e))
 			return
 		}
 		sid, err := a.Complete(r.Context(), q.Get("state"), q.Get("code"))
 		if err != nil {
-			problem(w, http.StatusForbidden, err)
+			turnedAway(w, http.StatusForbidden, err)
 			return
 		}
 		http.SetCookie(w, &http.Cookie{
@@ -137,15 +174,32 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	// button", and answering that needs no secret.
 	mux.HandleFunc("GET /admin/v1/me", func(w http.ResponseWriter, r *http.Request) {
 		who, ok := a.current(r)
-		writeJSON(w, map[string]any{
+		body := map[string]any{
 			"signedIn": ok,
 			"email":    who.Email,
+			// THE PAGE NAMES PEOPLE BY IDENTITY, NOT BY EMAIL. An OIDC
+			// provider need not return an email at all, and when it does not,
+			// every person on the relay compares equal to every other — which
+			// is how the console came to render a "you" chip on every row and
+			// a Block button on none. The store keys people on (issuer,
+			// subject) and hands out this id precisely so there is something
+			// stable to compare.
+			"userId": who.UserID,
 			// The page renders one of two consoles off this. An operator gets
 			// the whole relay; everybody else gets their own space, which is
 			// the same shape with one row in it.
 			"operator": who.Operator,
-			"signup":   string(a.cfg.Signup),
-		})
+		}
+		// THE POLICY IS NOT ANONYMOUS INFORMATION. It tells a stranger whether
+		// this relay hands out accounts on request, which is a reason to come
+		// back and a thing to enumerate across relays. The page only needs it
+		// once somebody is signed in, because it decides whether to draw a
+		// button they could use — and portal.go states that /v1/meta is
+		// deliberately the only structured thing served without a session.
+		if ok {
+			body["signup"] = string(a.cfg.Signup)
+		}
+		writeJSON(w, body)
 	})
 
 	// ---- anybody signed in: their own space --------------------------------
@@ -153,7 +207,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	mux.Handle("GET /admin/v1/my/accounts", a.signedIn(func(w http.ResponseWriter, r *http.Request, who Signed) {
 		list, err := admin.AccountsOf(r.Context(), who.UserID)
 		if err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"accounts": list})
@@ -169,7 +223,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		}
 		token, err := admin.NewInviteFor(r.Context(), who.UserID, 24*time.Hour)
 		if err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"invite": token, "hours": 24})
@@ -180,7 +234,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	mux.Handle("GET /admin/v1/users", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		list, err := admin.Users(r.Context())
 		if err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"users": list})
@@ -197,8 +251,17 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 			return
 		}
 		if err := admin.SetUserBlocked(r.Context(), r.PathValue("id"), blocked); err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
+		}
+		// THE FLAG ALONE DOES NOT STOP ANYBODY WHO IS ALREADY SIGNED IN.
+		// Sessions are held in memory and the store is read at sign-in, so a
+		// block used to take effect at the blocked person's NEXT sign-in and
+		// not on the tab they had open — while the console's own confirmation
+		// told the operator they had been stopped. Ending their sessions here
+		// is what makes that sentence true.
+		if blocked {
+			a.EndAllFor(r.PathValue("id"))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -213,7 +276,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		// nobody until they do.
 		token, err := admin.NewInviteFor(r.Context(), "", time.Duration(hours)*time.Hour)
 		if err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
 		}
 		// The token is returned ONCE and never stored anywhere this page can
@@ -224,7 +287,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	mux.Handle("GET /admin/v1/accounts", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		list, err := admin.Accounts(r.Context())
 		if err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
 		}
 		writeJSON(w, map[string]any{"accounts": list})
@@ -237,7 +300,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 			return
 		}
 		if err := admin.SetQuota(r.Context(), r.PathValue("id"), bytes); err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -245,7 +308,7 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 
 	mux.Handle("DELETE /admin/v1/accounts/{id}", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
 		if err := admin.DeleteAccount(r.Context(), r.PathValue("id")); err != nil {
-			problem(w, http.StatusInternalServerError, err)
+			fault(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -302,6 +365,37 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// turnedAway renders a refusal for a BROWSER NAVIGATION rather than for a
+// fetch.
+//
+// /admin/callback is reached by the provider redirecting a person's browser to
+// it, so whatever it writes is what they see in the window — and it wrote
+// JSON. Somebody turned away by the signup policy, somebody blocked, and
+// anybody who pressed the back button all landed on a blank white page reading
+// {"error":"this relay is not open for sign-in; ask whoever runs it"}. That
+// sentence was written for a human; it just was not being shown to one.
+//
+// The markup is deliberately tiny and carries no script and no inline style,
+// so it needs nothing from the Content-Security-Policy that the rest of the
+// portal does not already allow.
+func turnedAway(w http.ResponseWriter, code int, err error) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	page := `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Not signed in</title>
+<link rel="stylesheet" href="/assets/portal.css"></head>
+<body><main class="wrap">
+<h1>Not signed in</h1>
+<p class="problem">` + template.HTMLEscapeString(err.Error()) + `</p>
+<p><a class="button ghost" href="/">Back to the relay</a></p>
+</main></body></html>`
+	_, _ = io.WriteString(w, page)
 }
 
 func problem(w http.ResponseWriter, code int, err error) {

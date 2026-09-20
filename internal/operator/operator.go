@@ -377,7 +377,22 @@ func (a *Auth) Complete(ctx context.Context, state, code string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if user.Blocked {
+	// THE OPERATOR CANNOT BE LOCKED OUT OF THEIR OWN RELAY, and the exemption
+	// is `isOperator` rather than a flag somebody can set.
+	//
+	// The route already refuses a self-block for this reason — an operator who
+	// blocked themselves could not sign in to unblock themselves, and the
+	// remedy would be a SQL statement on the box. But the route is not the
+	// only way the column gets written: an operator tidying the database by
+	// hand, or a script, can set `blocked_at` on any row including their own.
+	// Before this, that was a PERMANENT lockout that looked fine until the tab
+	// was closed — the live session kept working, a fresh sign-in was refused,
+	// and the one route that could clear the flag refuses to act on yourself.
+	//
+	// So a blocked operator is treated as what they are: the person who holds
+	// this relay. The flag stays set and stays visible in the console, because
+	// deleting it would hide that somebody tried.
+	if user.Blocked && !isOperator {
 		// Distinct from "not open", because only one of the two is worth
 		// contacting somebody about.
 		return "", errors.New("this account has been blocked on this relay")
@@ -462,6 +477,41 @@ func (a *Auth) Session(sid string) (Signed, bool) {
 		return Signed{}, false
 	}
 	return Signed{UserID: s.userID, Email: s.email, Operator: s.operator}, true
+}
+
+// EndAllFor signs out every live session belonging to one person, and returns
+// how many it ended.
+//
+// BLOCKING SOMEBODY HAS TO REACH THE TAB THEY ALREADY HAVE OPEN. Sessions live
+// in this map and the blocked flag lives in the store, and the store is only
+// consulted when somebody signs IN — so before this existed, blocking set a
+// flag that the person's current session never read. They kept working for up
+// to the session lifetime while the console said they had been stopped, and
+// the operator had no way to end it short of restarting the relay.
+//
+// It is deliberately a sweep of the map rather than a per-request store
+// lookup: a database read on every authenticated request would be a permanent
+// cost paid to catch a rare event, and the event has exactly one trigger,
+// which can do the work itself.
+//
+// The known limit: a row blocked out of band — someone editing the database
+// directly — still will not end a live session, because nothing tells this
+// process it happened. That is the same shape as every other out-of-band edit
+// to a running relay, and the remedy is the same, a restart.
+func (a *Auth) EndAllFor(userID string) int {
+	if userID == "" {
+		return 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ended := 0
+	for k, s := range a.sessions {
+		if s.userID == userID {
+			delete(a.sessions, k)
+			ended++
+		}
+	}
+	return ended
 }
 
 // End signs one session out.
