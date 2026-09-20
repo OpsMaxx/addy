@@ -50,6 +50,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -342,6 +343,21 @@ func (a *Auth) Complete(ctx context.Context, state, code string) (string, error)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := a.http.Do(req)
 	if err != nil {
+		// A TIMEOUT HERE IS NOT THE PERSON'S FAULT AND IS USUALLY TRANSIENT,
+		// so it says what to do rather than quoting the transport.
+		//
+		// This reaches a browser as a page, so the raw error — `Post
+		// "https://oauth2.googleapis.com/token": context deadline exceeded
+		// (Client.Timeout exceeded while awaiting headers)` — was shown to a
+		// human as the whole explanation. It names a URL they cannot act on
+		// and a Go field name, and it does not say the one useful thing, which
+		// is that signing in again will very likely work.
+		//
+		// The underlying error is still wrapped, so it is in the log for
+		// whoever runs the relay.
+		if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
+			return "", fmt.Errorf("the identity provider did not answer in time; sign in again: %w", err)
+		}
 		return "", fmt.Errorf("operator: exchanging the code: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

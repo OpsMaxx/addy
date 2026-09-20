@@ -56,15 +56,28 @@ type Config struct {
 	Log    *slog.Logger
 }
 
-// DefaultPortRange is the relay range, chosen to sit clear of the ports a box
-// running addy's own service wizards will want.
+// DefaultPortRange is the relay range, chosen to sit clear both of the ports a
+// box running addy's own service wizards will want AND of the ports the kernel
+// hands out to everything else.
 //
 // 49152-65535 is the IANA ephemeral range and is where a TURN server belongs,
 // but the top of it collides with nothing and the bottom is busy. 51820
 // (WireGuard) sits below this window, which is the collision that made the
 // range worth stating rather than defaulting.
+//
+// THE FLOOR IS 61000 BECAUSE LINUX HANDS OUT 32768-60999 ITSELF. That is
+// `net.ipv4.ip_local_port_range` on a default Ubuntu, and it is the range every
+// outbound connection this process makes draws from — including the DNS
+// lookups and the HTTPS calls to the identity provider. A relay range starting
+// at 52000 overlapped it by nine thousand ports, so a TURN allocation and an
+// outbound socket could be handed the same number: the allocation fails, or the
+// connection does, and which one loses depends on who asked first. The IANA
+// range says where a TURN server belongs; the kernel says which part of it is
+// actually free, and the kernel is the one enforcing it.
+//
+// 61000-65535 is 4536 ports, and a port is one relayed session at a time.
 const (
-	DefaultMinPort uint16 = 52000
+	DefaultMinPort uint16 = 61000
 	DefaultMaxPort uint16 = 65535
 	DefaultPort           = 3478
 )
