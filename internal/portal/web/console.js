@@ -6,7 +6,7 @@
 // in should not present itself as an administration console, because it is not
 // administering anything.
 
-import { $, api, boot, bytes, cell, fail, shortId, when, wireMint } from './console-kit.js'
+import { $, api, boot, bytes, cell, clearProblem, fail, shortId, when, wireMint } from './console-kit.js'
 
 async function loadMine() {
   const { accounts } = await api('/admin/v1/my/accounts')
@@ -27,7 +27,47 @@ async function loadMine() {
     entries += a.rosterEntries
     used += a.usedBytes
     const tr = document.createElement('tr')
-    tr.append(shortId(a.accountId), cell(String(a.rosterEntries)), cell(bytes(a.usedBytes)), cell(when(a.createdAt)))
+    // DELETING YOUR OWN SYNC GROUP, from the page you are already on.
+    //
+    // The route existed and nothing called it, which is the defect this
+    // project keeps producing — a control implemented, tested and reachable
+    // from nowhere. Somebody whose devices are all gone and who has no
+    // recovery phrase has exactly one way forward, and it was an operator's
+    // page they may not be able to open.
+    const actions = document.createElement('td')
+    actions.className = 'right'
+    const del = document.createElement('button')
+    del.className = 'button ghost small danger'
+    del.textContent = 'Delete'
+    del.setAttribute('aria-label', `Delete sync group ${a.accountId}`)
+    del.addEventListener('click', async () => {
+      // Said in full, because nothing here can be undone and nothing can be
+      // read out first: this relay holds no key to any of it.
+      const ok = window.confirm(
+        `Delete this sync group?\n\n` +
+          `${a.rosterEntries} roster entr${a.rosterEntries === 1 ? 'y' : 'ies'} and ` +
+          `${bytes(a.usedBytes)} of sealed data go with it. This relay cannot read any of it, ` +
+          `so it cannot be exported first, and it cannot be undone.\n\n` +
+          `Any device still on this group keeps whatever is already on it, and stops syncing.`
+      )
+      if (!ok) return
+      try {
+        clearProblem()
+        await api(`/admin/v1/my/accounts/${encodeURIComponent(a.accountId)}`, { method: 'DELETE' })
+        await loadMine()
+      } catch (err) {
+        fail(err)
+      }
+    })
+    actions.append(del)
+
+    tr.append(
+      shortId(a.accountId),
+      cell(String(a.rosterEntries)),
+      cell(bytes(a.usedBytes)),
+      cell(when(a.createdAt)),
+      actions
+    )
     body.append(tr)
   }
 
