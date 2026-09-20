@@ -131,6 +131,12 @@ func serve(args []string) error {
 		"headscale API key. Powerful: it can create and delete nodes, users and keys across the whole coordination server")
 	fs.StringVar(&cfg.HeadscaleUser, "headscale-user", "addy",
 		"headscale user that owns the joined nodes. One per account keeps the node list readable")
+	fs.StringVar(&cfg.OIDCIssuer, "oidc-issuer", "",
+		"Identity provider for the operator portal, as an OIDC issuer URL — https://accounts.google.com for Google. Without all three -oidc flags no portal is served and you administer this relay with the addy command")
+	fs.StringVar(&cfg.OIDCClientID, "oidc-client-id", "",
+		"OAuth client id for the operator portal. The redirect URI to register with the provider is https://<your-domain>/admin/callback")
+	fs.StringVar(&cfg.OIDCClientSecret, "oidc-client-secret", "",
+		"OAuth client secret for the operator portal. THE FIRST PERSON TO SIGN IN CLAIMS THIS RELAY and everybody after has to be them; without that, every account at the provider would be an administrator here")
 	fs.StringVar(&cfg.TurnExternal, "turn", "",
 		"Use an external TURN server instead of the embedded one, as turn:host:port. Devices are told to use it and this box relays nothing")
 	if err := fs.Parse(args); err != nil {

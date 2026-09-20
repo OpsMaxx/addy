@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>addy — operator</title>
+    <link rel="stylesheet" href="/assets/portal.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>addy</h1>
+      <p class="lede">Operator console for the person who runs this relay.</p>
+
+      <!-- Rendered by admin.js off /admin/v1/me. Everything below starts
+           hidden so a page loaded without a session never flashes the
+           console before it knows there is nobody signed in. -->
+      <section id="signed-out" hidden>
+        <div class="card">
+          <h2>Sign in</h2>
+          <p>
+            The first person to sign in claims this relay. After that, only that
+            account can sign in here.
+          </p>
+          <p><a class="button" href="/admin/login">Sign in</a></p>
+        </div>
+      </section>
+
+      <section id="unconfigured" hidden>
+        <div class="card">
+          <h2>No operator sign-in is configured</h2>
+          <p>
+            This relay has no identity provider set, so there is no console to
+            sign in to. Administer it with the <code>addy</code> command on the
+            box, or restart it with <code>-oidc-issuer</code>,
+            <code>-oidc-client-id</code> and <code>-oidc-client-secret</code>.
+          </p>
+        </div>
+      </section>
+
+      <section id="console" hidden>
+        <div class="row">
+          <p class="fine">Signed in as <span id="who"></span></p>
+          <button id="signout" class="button ghost">Sign out</button>
+        </div>
+
+        <div class="card">
+          <h2>Add a device to this relay</h2>
+          <p>
+            An invite lets one person create one account. They paste it into
+            OpsMaxx on their first machine; every machine after that is added
+            by pairing from one that already works, and never needs an invite.
+          </p>
+          <p>
+            <button id="mint" class="button">Create an invite</button>
+            <span id="mint-note" class="fine"></span>
+          </p>
+          <pre id="invite" hidden></pre>
+          <p id="invite-warn" class="fine" hidden>
+            Copy it now — it is shown once and this page cannot show it again.
+            Hand it over the way you would a password.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>Accounts</h2>
+          <p class="fine">
+            What this relay can see, which is deliberately not much: an account
+            is an identifier, a device count and a number of bytes. It holds no
+            key, so it cannot read a device name, a server, or anything else
+            inside. Devices are added and removed from OpsMaxx itself, where the
+            keys are — there is no button here for it, and there cannot be one.
+          </p>
+          <table class="accounts">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Devices</th>
+                <th>Used</th>
+                <th>Quota</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="accounts"></tbody>
+          </table>
+          <p id="no-accounts" class="fine" hidden>
+            Nobody has created an account on this relay yet. Make an invite
+            above and paste it into OpsMaxx.
+          </p>
+        </div>
+      </section>
+
+      <p id="problem" class="problem" role="alert" hidden></p>
+    </main>
+    <script src="/assets/admin.js"></script>
+  </body>
+</html>

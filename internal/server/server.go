@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/opsmaxx/addy/internal/api"
 	"github.com/opsmaxx/addy/internal/frontdoor"
+	"github.com/opsmaxx/addy/internal/operator"
 	"github.com/opsmaxx/addy/internal/overlay"
 	"github.com/opsmaxx/addy/internal/portal"
 	"github.com/opsmaxx/addy/internal/relay"
@@ -49,6 +51,17 @@ type Config struct {
 	TurnPort     int
 	TurnSecret   string
 	TurnExternal string
+
+	// The operator portal's identity provider. OFF unless all three are set,
+	// and absent rather than open when it is off — see internal/operator.
+	//
+	// Google is not special here: it is `https://accounts.google.com` in
+	// OIDCIssuer. Any provider with OIDC discovery works, which is the point:
+	// a relay somebody runs for their own team should sit behind whatever that
+	// team already signs in to.
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
 
 	// The overlay control plane. Off unless HeadscaleURL is set; the API key
 	// is powerful -- it can create and delete nodes, users and keys across the
@@ -239,6 +252,41 @@ func Run(ctx context.Context, cfg Config) error {
 			return fmt.Errorf("building the portal: %w", err)
 		}
 		pages = portal.NoServiceWorker(p)
+	}
+
+	// The operator portal. Mounted on the SAME mux as /v1/ rather than inside
+	// `pages`, because it must work whether or not -ui is on: an operator who
+	// wants to mint an invite from a browser should not have to also serve the
+	// public portal to do it.
+	operatorBase := "https://" + cfg.Domain
+	if cfg.Dev {
+		// LOCALHOST, NOT THE BIND ADDRESS. `-dev` binds 127.0.0.1 by default,
+		// and the front door gates on SNI — which an IP literal has none of,
+		// so a redirect URI built from the bind address is one this relay
+		// refuses to answer. The dev hosts are `localhost` and
+		// `addy.localhost`; only the port carries over.
+		operatorBase = "https://localhost"
+		if _, port, err := net.SplitHostPort(cfg.Addr); err == nil && port != "" {
+			operatorBase += ":" + port
+		}
+	}
+	opCfg := operator.Config{
+		Issuer:       cfg.OIDCIssuer,
+		ClientID:     cfg.OIDCClientID,
+		ClientSecret: cfg.OIDCClientSecret,
+		BaseURL:      operatorBase,
+	}
+	if opCfg.Enabled() {
+		operator.New(opCfg, db).Routes(mux, adminFor(db))
+		log.Info("operator portal: sign-in is configured",
+			"issuer", cfg.OIDCIssuer, "redirect", operatorBase+"/admin/callback")
+	} else if cfg.UI {
+		// Said once at startup rather than discovered as a 404. The portal
+		// renders a sign-in button off /admin/v1/me, and an operator who
+		// configured two of the three flags should be told which one is
+		// missing rather than left pressing a button that does nothing.
+		log.Info("operator portal: not configured; administer with the addy command over SSH",
+			"needs", "-oidc-issuer, -oidc-client-id and -oidc-client-secret")
 	}
 	// /v1/meta is served WHETHER OR NOT THE PORTAL IS ON, and that is a fix
 	// rather than a preference.
@@ -432,4 +480,50 @@ type overlayAdapter struct{ m *overlay.Minter }
 
 func (a overlayAdapter) Mint(ctx context.Context, device []byte, controlURL string) (any, error) {
 	return a.m.Mint(ctx, device, controlURL)
+}
+
+// adminFor adapts the store to what the operator portal needs.
+//
+// An ADAPTER rather than the store implementing the interface directly,
+// because the two have different jobs: the store's `Accounts` returns
+// `time.Time` and the portal serves JSON, and a store that started formatting
+// timestamps for a web page would be a store with a view layer in it.
+type storeAdmin struct{ db *store.DB }
+
+func adminFor(db *store.DB) operator.Admin { return storeAdmin{db} }
+
+func (s storeAdmin) NewInvite(ctx context.Context, ttl time.Duration) (string, error) {
+	return s.db.NewInvite(ctx, ttl)
+}
+
+func (s storeAdmin) SetQuota(ctx context.Context, accountID string, bytes int64) error {
+	return s.db.SetQuota(ctx, accountID, bytes)
+}
+
+func (s storeAdmin) DeleteAccount(ctx context.Context, accountID string) error {
+	return s.db.DeleteAccount(ctx, accountID)
+}
+
+func (s storeAdmin) Accounts(ctx context.Context) ([]operator.AccountView, error) {
+	rows, err := s.db.Accounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]operator.AccountView, 0, len(rows))
+	for _, r := range rows {
+		v := operator.AccountView{
+			AccountID: r.AccountID,
+			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
+			Devices:   r.Devices,
+			UsedBytes: r.UsedBytes,
+			QuotaByte: r.QuotaByte,
+		}
+		// Omitted rather than sent as the zero time. A device that has never
+		// checked in is a real state, and 1970 is not what it looks like.
+		if !r.LastSeen.IsZero() {
+			v.LastSeen = r.LastSeen.UTC().Format(time.RFC3339)
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }

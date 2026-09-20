@@ -34,6 +34,21 @@ const ReonboardKey = "reonboard_required"
 // syncing to a box its owner has disowned.
 const SecretEpochKey = "secret_epoch"
 
+// InstanceValue and SetInstanceValue are the exported pair, for callers
+// outside this package that need one specific instance row.
+//
+// Exported narrowly rather than by making the whole table public: the operator
+// portal needs to read and write exactly one key — who claimed this relay —
+// and giving it a typed accessor for that would mean this package knowing what
+// an operator is.
+func (d *DB) InstanceValue(ctx context.Context, key string) (string, time.Time, error) {
+	return d.instanceValue(ctx, key)
+}
+
+func (d *DB) SetInstanceValue(ctx context.Context, key, value string) error {
+	return d.setInstanceValue(ctx, key, value)
+}
+
 func (d *DB) instanceValue(ctx context.Context, key string) (string, time.Time, error) {
 	var value string
 	var at int64

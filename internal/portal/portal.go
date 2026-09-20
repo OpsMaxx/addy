@@ -72,6 +72,22 @@ func Handler(cfg Config) (http.Handler, error) {
 		_, _ = w.Write(page)
 	})
 
+	// The operator console's PAGE. Its routes live in internal/operator and
+	// are mounted on the API's mux; this serves the HTML, so the page exists
+	// whether or not a provider is configured — and says which of the two it
+	// is, rather than 404ing at somebody who typed the address they were told
+	// to use.
+	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		page, err := fs.ReadFile(sub, "admin.html")
+		if err != nil {
+			http.Error(w, "portal unavailable", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(page)
+	})
+
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		index, err := fs.ReadFile(sub, "index.html")
