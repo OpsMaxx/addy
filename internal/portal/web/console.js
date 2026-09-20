@@ -6,7 +6,7 @@
 // in should not present itself as an administration console, because it is not
 // administering anything.
 
-import { $, api, boot, bytes, cell, clearProblem, fail, shortId, when, wireMint } from './console-kit.js'
+import { $, api, boot, bytes, cell, clearProblem, copy, fail, relayLink, shortId, when, wireMint } from './console-kit.js'
 
 async function loadMine() {
   const { accounts } = await api('/admin/v1/my/accounts')
@@ -19,7 +19,7 @@ async function loadMine() {
   $('no-mine').hidden = some
 
   $('no-mine-text').textContent =
-    'No devices on this relay yet. Create an invite above, then paste it into OpsMaxx along with this relay’s address to set up your first one.'
+    'Nothing of yours is on this relay yet. Create an invite above and paste it into OpsMaxx: that sets up your first device and creates the group it syncs into.'
 
   let entries = 0
   let used = 0
@@ -113,14 +113,21 @@ function wireMyInvite(groups) {
   $('mine-lead').textContent = first ? 'Set up your first device' : 'Add another device'
   $('invite-blurb').textContent = first
     ? 'An invite sets up your first device on this relay and creates the sync group it syncs into. Make one here — it needs nobody else — and paste it into OpsMaxx together with this relay’s address.'
-    : 'Add it by pairing from a device you already have: open OpsMaxx on both, one shows a code, and you check that the same seven emoji appear on each. No invite, and nothing to ask anybody for.'
+    : 'A second device joins by pairing with one you already have — no invite, and nothing to ask anybody for. This relay cannot do the joining part for you, because that is signed with a key it does not have. It can give you the one thing the new machine has no way of knowing.'
 
   // Pairing is the answer once there is something to pair with, so the button
   // would be offering the wrong one of the two.
   if (!first) {
     $('mint-mine-row').remove()
+    showHandoff()
     return
   }
+
+  // Nothing to pair WITH yet, so the steps would be describing a machine that
+  // does not exist. Removed rather than hidden, for the reason the rest of
+  // this page removes things: hiding is a promise the stylesheet has broken
+  // here before.
+  $('pair-steps').remove()
 
   wireMint({
     button: $('mint-mine'),
@@ -130,6 +137,46 @@ function wireMyInvite(groups) {
     path: '/admin/v1/my/invite',
     plain: $('invite-mine-plain'),
     plainLabel: $('invite-mine-plain-label')
+  })
+}
+
+/**
+ * The handoff to a second machine, which is as far as this relay can take it.
+ *
+ * IT CANNOT ADD A DEVICE AND IT DOES NOT PRETEND TO. Adding one means signing
+ * a roster entry with the account key; the key is on the devices and this
+ * server has never held a copy. What it can do is remove the step that
+ * actually stops people, which is not the pairing and not the emoji: it is
+ * that the joining machine is asked to name a relay, and nothing on that
+ * machine knows the name. The person is expected to remember a hostname and
+ * type it correctly before anything else can begin.
+ *
+ * `location.origin` rather than a configured hostname, so it names the relay
+ * the reader is looking at rather than whatever a unit file believes this box
+ * is called — the same reason the invite link is built that way. It has no
+ * path and no credentials, which is what the client's link parser insists on.
+ *
+ * THE LINK CARRIES THE ADDRESS AND NOTHING ELSE. An invite in it would be
+ * worse than none: spending a second invite starts a SEPARATE sync group with
+ * its own key, which is the outcome this card exists to prevent. A `pair` link
+ * is not ours to build either — its code and pairing id can only be minted by
+ * a machine holding the account key, which is every machine except this one.
+ * So the link fills a field and chooses nothing, and the format lives beside
+ * the invite's in `console-kit.js` so the two cannot drift from the parser.
+ *
+ * The href is set here rather than written into the markup, because the markup
+ * does not know what this relay is called — the same reason the address below
+ * it is not hardcoded either.
+ */
+function showHandoff() {
+  $('pair-steps').hidden = false
+  $('relay-address').textContent = window.location.origin
+  $('open-here').href = relayLink()
+  const note = $('copy-relay-note')
+  $('copy-relay').addEventListener('click', async () => {
+    note.textContent = (await copy(window.location.origin))
+      ? 'Copied.'
+      : 'This browser would not let the page copy it — select it and copy by hand.'
   })
 }
 

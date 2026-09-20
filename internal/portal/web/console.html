@@ -27,7 +27,7 @@
       </header>
 
       <!-- THIS IS NOT AN ADMINISTRATION CONSOLE and does not describe itself as
-           one. Everything on it is the reader's own: their devices, their
+           one. Everything on it is the reader's own: their sync groups, their
            devices, their invite. Whoever also runs the relay gets a link at the
            bottom to a separate page, and nothing else here changes for them. -->
       <h1>Your console</h1>
@@ -72,12 +72,96 @@
             <span id="mint-mine-note" class="fine"></span>
           </p>
           <code id="invite-mine" class="token" hidden></code>
-                    <p class="fine" id="invite-mine-plain-label" hidden>Or paste this code into OpsMaxx by hand:</p>
+          <p class="fine" id="invite-mine-plain-label" hidden>Or paste this code into OpsMaxx by hand:</p>
           <code id="invite-mine-plain" class="token" hidden></code>
-<p id="invite-mine-warn" class="fine flush" hidden>
+          <p id="invite-mine-warn" class="fine flush" hidden>
             Copy it now — it is shown once and this page cannot show it again.
             Hand it over the way you would a password.
           </p>
+
+          <!-- THE SECOND DEVICE, and the honest answer to "there is no option
+               to add one here".
+
+               There is not, and there cannot be: adding a device means signing
+               a roster entry with the account key, and this relay holds no key.
+               What the relay DOES hold, and what nothing on the new machine
+               knows, is its own address — the joining machine is asked for it
+               before it is allowed to do anything else, and typing a hostname
+               from memory is where this evening went. So the address is here,
+               once, with the button that puts it on the clipboard, beside the
+               steps in the order the two machines actually perform them.
+
+               No `opsmaxx://` link is offered here on purpose. A `sync` link
+               without an invite is refused by the app, and one WITH a fresh
+               invite would start a SECOND sync group rather than join this one.
+               Only the machine already holding the account can mint a `pair`
+               link, and that machine is not this server. -->
+          <div id="pair-steps" hidden>
+            <ol class="steps">
+              <li>
+                <strong>Start on a machine you already use.</strong> Open
+                <em>Sync &amp; devices</em> in OpsMaxx there, choose
+                <em>Add another device</em>, then
+                <em>Show a code on this device</em>. Leave that window open —
+                the code lives only while it is on screen.
+              </li>
+              <li>
+                <strong>On the new machine</strong>, install OpsMaxx and choose
+                <em>I already use OpsMaxx on another machine</em>. It asks for
+                this relay's address before it will go any further, and this is
+                the address:
+                <span class="handoff">
+                  <code id="relay-address" class="token"></code>
+                  <button id="copy-relay" class="button ghost small">Copy address</button>
+                  <a id="open-here" class="button ghost small">Open OpsMaxx here</a>
+                  <span id="copy-relay-note" class="fine"></span>
+                </span>
+                <!-- BOTH, FOR THE SAME REASON THE INVITE IS OFFERED BOTH WAYS.
+                     A link is one click on a machine that has the app; a
+                     plain address is what survives a chat client that mangles
+                     an unknown scheme, a phone camera, or somebody reading it
+                     down the line. Neither works everywhere. -->
+                <p class="fine">
+                  The link is for a browser that is already ON the new machine:
+                  it opens OpsMaxx there with the address filled in, and still
+                  leaves you to say how this machine joins. It needs OpsMaxx
+                  <strong>0.50.15 or later</strong> — earlier builds do not
+                  register the <code>opsmaxx://</code> scheme, so clicking it
+                  does nothing at all rather than saying so. Copy the address
+                  instead if you are on an older one.
+                </p>
+              </li>
+              <li>
+                <strong>Type the code into the new machine</strong>, then check
+                that the same seven emoji appear on both and confirm on each.
+                That comparison is the whole security of pairing; nothing is
+                added until both sides agree.
+              </li>
+            </ol>
+
+            <!-- COMPLAINT 2, ANSWERED RATHER THAN BUILT. "Pick a primary
+                 device" has no control behind it because there is no primary
+                 and there should not be — but the question underneath it,
+                 "which machine do I go to", deserves a straight answer, and
+                 this is the only page that lists anything. -->
+            <p class="fine">
+              <strong>Which machine do you start from? Any of them.</strong>
+              There is no primary device, and this relay could not nominate one
+              if there were: it cannot tell your machines apart, cannot read
+              their names, and does not record when any of them was last awake.
+              Every device holds the same account key, so the one to start from
+              is whichever one you are sitting at.
+            </p>
+            <p class="fine">
+              <strong>If you cannot reach any of them</strong>, the recovery
+              phrase you wrote down when you set up your first device restores
+              this account on a new machine without needing an old one. It is
+              what a primary device would have been for, and it cannot be lost
+              with a laptop. Without a device and without the phrase there is
+              no way back into this group — what is here stays sealed, and
+              starting again means deleting it below.
+            </p>
+          </div>
         </div>
 
         <!-- The three numbers this relay holds about you, and there are no
@@ -104,7 +188,20 @@
         </section>
 
         <div class="card">
-          <div class="card-head"><h2>Your devices</h2></div>
+          <!-- NAMED FOR WHAT IT HOLDS. This card was called "Your devices",
+               and then said twice in its own prose that it cannot show a
+               device — not a name, not a count. Meanwhile the word somebody
+               goes looking for, "sync group", appeared here only as a column
+               header, and on the operator page as a heading. So the one page
+               where a person's OWN groups live was the page that never said
+               the word out loud, and the operator page looked like where the
+               feature lived. It is not: this is. -->
+          <div class="card-head"><h2>Your sync groups</h2></div>
+          <p class="fine">
+            A sync group is one set of devices sharing one key. Most people
+            have exactly one and never need the words; you have one per invite
+            you have ever spent, and nothing syncs between two of them.
+          </p>
           <div id="my-accounts-shell" class="scroller" hidden>
             <table class="listing static">
               <thead>
@@ -120,7 +217,7 @@
             </table>
           </div>
           <div id="no-mine" class="empty" hidden>
-            <p><strong>Nothing here yet</strong></p>
+            <p><strong>No sync group yet</strong></p>
             <p class="fine flush" id="no-mine-text"></p>
           </div>
           <p class="fine">

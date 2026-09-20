@@ -65,9 +65,9 @@
         <div class="card feature">
           <div class="card-head"><h2>This relay is not yours to run</h2></div>
           <p class="fine">
-            This page belongs to whoever set this relay up. Your own devices,
-            devices and invites are on your console, and nothing here is needed
-            to use them.
+            This page belongs to whoever set this relay up. Your own sync
+            groups, devices and invites are on your console, and nothing here
+            is needed to use them.
           </p>
           <p class="flush"><a class="button" href="/console">Go to your console</a></p>
         </div>
@@ -164,6 +164,16 @@
             — so the number goes up when somebody removes a machine. Counting
             live devices means verifying the chain, which needs a key this relay
             does not have.
+          </p>
+          <!-- THIS PAGE IS NOT WHERE SYNC GROUPS LIVE, it is where everybody
+               else's do. Somebody looking for their own reaches this heading
+               first, because it is the only place the words are a heading, and
+               then reads a table of identifiers with an owner column instead
+               of finding themselves. One line, pointing back. -->
+          <p class="fine flush">
+            Your own are on <a href="/console">your console</a>, with the
+            invite and the steps for adding a device to them. Nothing on this
+            page is needed to use your own.
           </p>
           <div id="accounts-shell" class="scroller" hidden>
             <table class="listing">

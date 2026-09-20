@@ -701,6 +701,62 @@ table.listing,
   user-select: all;
 }
 
+/* ---------------------------------------------------------------------------
+   Steps, and the one string a person carries to another machine
+   --------------------------------------------------------------------------- */
+
+/* Two machines take turns, so the order is load-bearing and a paragraph hides
+   it. An ordered list is the native way to say "first this, then that" and it
+   comes with the numbering, the indent and the semantics already. */
+.steps {
+  margin: 0 0 var(--sp-4);
+  padding-left: var(--sp-5);
+  color: var(--text-muted);
+  font-size: var(--fs-fine);
+}
+
+.steps li {
+  margin-bottom: var(--sp-3);
+}
+
+.steps li:last-child {
+  margin-bottom: 0;
+}
+
+/* Which machine a step happens on, at full contrast. It is the part somebody
+   scanning needs and the part that is wrong when a pairing fails. */
+.steps strong {
+  color: var(--text);
+}
+
+.steps em {
+  color: var(--text);
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* An address and the button that copies it. Wraps rather than squeezing the
+   button off the edge: at 360px the address alone is most of the width, so the
+   button takes its own line instead of shrinking to an unhittable stub. */
+.handoff {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+}
+
+.handoff .token {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+/* A caveat under a step, not a step of its own. Numbering it would say it was
+   something to do. */
+.steps p {
+  margin: var(--sp-2) 0 0;
+}
+
 /* The first screen a new member sees is the one where they have nothing, so it
    is the most important screen in the product rather than a leftover state. */
 .empty {

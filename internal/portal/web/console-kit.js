@@ -208,17 +208,33 @@ export function cell(text, cls) {
  */
 
 /**
- * The `opsmaxx://` link for an invite.
+ * The `opsmaxx://sync` link for THIS relay, carrying the address and nothing
+ * else.
  *
  * Built from `location.origin`, so it names the relay the person is actually
  * looking at rather than whatever a configuration file thinks this box is
  * called. The client refuses a link whose relay is not https (except on
  * loopback, for a dev relay), has credentials in it, or carries a path — see
- * `parseAddyLink` on that side; this is the half that has to agree with it.
+ * `parseAddyLink` in the client's `src/shared/addyLink.ts`, which is the other
+ * half of this format and the only thing that decides whether a link is one.
+ * `location.origin` satisfies all three by construction: it is scheme, host
+ * and port, with no path and no userinfo to strip.
+ *
+ * AN ADDRESS IS NOT A CREDENTIAL. This link spends nothing, joins nothing and
+ * chooses nothing — on the other side it fills the relay field and leaves the
+ * fork between "set up", "join" and "recover" to the person. That is why it is
+ * safe to put on a page beside a button, and an invite link is not.
+ *
+ * The invite form is this plus one parameter, so the half that has to agree
+ * with the parser is written once.
  */
-function inviteLink(invite) {
+export function relayLink() {
   const r = new URL(location.origin)
-  return `opsmaxx://sync?relay=${encodeURIComponent(`${r.protocol}//${r.host}`)}&invite=${encodeURIComponent(invite)}`
+  return `opsmaxx://sync?relay=${encodeURIComponent(`${r.protocol}//${r.host}`)}`
+}
+
+function inviteLink(invite) {
+  return `${relayLink()}&invite=${encodeURIComponent(invite)}`
 }
 
 export function wireMint({ button, note, out, warn, path, plain, plainLabel }) {
@@ -261,7 +277,10 @@ export function wireMint({ button, note, out, warn, path, plain, plainLabel }) {
   })
 }
 
-async function copy(text) {
+/** Clipboard, or an honest false. `navigator.clipboard` is undefined outside a
+ *  secure context, so a relay reached over plain http throws here rather than
+ *  returning anything — and every caller has something to say instead. */
+export async function copy(text) {
   try {
     await navigator.clipboard.writeText(text)
     return true
