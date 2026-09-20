@@ -110,7 +110,16 @@ func printVersion() {
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var cfg server.Config
-	fs.StringVar(&cfg.DataDir, "data-dir", server.DefaultDataDir, "Directory for the metadata database and local state")
+	// THE DEFAULT IS SUPPLIED BY envDefault BELOW, NOT HERE, and that is
+	// load-bearing rather than a style choice. envDefault leaves a value alone
+	// once something has set it, so a flag declared with a non-empty default is
+	// indistinguishable from one the operator passed — and the environment
+	// variable is then read, found, and thrown away. Both shipped deployments
+	// set ADDY_DATA_DIR (deploy/compose/docker-compose.yml and the Helm
+	// StatefulSet), and for as long as this line carried the default they were
+	// both silently ignored. Any flag with an ADDY_* variable belongs here with
+	// "" and its default in the envDefault call.
+	fs.StringVar(&cfg.DataDir, "data-dir", "", "Directory for the metadata database and local state (default "+server.DefaultDataDir+")")
 	fs.BoolVar(&cfg.Dev, "dev", false, "Localhost mode: self-signed certificate, no domain, no ACME, blobs on local disk")
 	fs.StringVar(&cfg.Addr, "addr", "", "TLS address to bind (default :443, or 127.0.0.1:8443 with -dev)")
 	fs.StringVar(&cfg.HTTPAddr, "http-addr", "", "Plain HTTP address to bind (default :80, or 127.0.0.1:8080 with -dev). ACME HTTP-01 arrives here or not at all")
@@ -131,6 +140,8 @@ func serve(args []string) error {
 		"headscale API key. Powerful: it can create and delete nodes, users and keys across the whole coordination server")
 	fs.StringVar(&cfg.HeadscaleUser, "headscale-user", "addy",
 		"headscale user that owns the joined nodes. One per account keeps the node list readable")
+	fs.StringVar(&cfg.Signup, "signup", "",
+		"Who may sign in besides the operator: `open` gives anybody who signs in an invite on request (right when the provider already IS your membership list, such as Google Workspace Internal), `invite` lets them sign in and see their own space while an invite still comes from you, `closed` admits nobody but you. Default: invite")
 	fs.StringVar(&cfg.OIDCIssuer, "oidc-issuer", "",
 		"Identity provider for the operator portal, as an OIDC issuer URL — https://accounts.google.com for Google. Without all three -oidc flags no portal is served and you administer this relay with the addy command")
 	fs.StringVar(&cfg.OIDCClientID, "oidc-client-id", "",
@@ -158,6 +169,7 @@ func serve(args []string) error {
 	envDefault(&cfg.TurnExternal, "ADDY_TURN_EXTERNAL", "")
 	envDefault(&cfg.HeadscaleURL, "ADDY_HEADSCALE_URL", "")
 	envDefault(&cfg.HeadscaleAPIKey, "ADDY_HEADSCALE_APIKEY", "")
+	envDefault(&cfg.Signup, "ADDY_SIGNUP", "invite")
 	envDefault(&cfg.OIDCIssuer, "ADDY_OIDC_ISSUER", "")
 	envDefault(&cfg.OIDCClientID, "ADDY_OIDC_CLIENT_ID", "")
 	// THE SECRET SHOULD COME FROM HERE, not from a flag.
