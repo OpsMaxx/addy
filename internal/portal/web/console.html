@@ -27,7 +27,7 @@
       </header>
 
       <!-- THIS IS NOT AN ADMINISTRATION CONSOLE and does not describe itself as
-           one. Everything on it is the reader's own: their accounts, their
+           one. Everything on it is the reader's own: their devices, their
            devices, their invite. Whoever also runs the relay gets a link at the
            bottom to a separate page, and nothing else here changes for them. -->
       <h1>Your console</h1>
@@ -41,7 +41,7 @@
         <div class="card feature">
           <div class="card-head"><h2>Sign in</h2></div>
           <p class="fine">
-            Signing in lets you see the accounts and devices you have on this
+            Signing in lets you see the devices you have on this
             relay. It gives no access to what is inside them — this server
             holds no key, and there is none to give.
           </p>
@@ -65,7 +65,7 @@
              thing to do, and for everybody else it is still the only thing this
              page can start. -->
         <div class="card feature">
-          <div class="card-head"><h2>Start an account</h2></div>
+          <div class="card-head"><h2 id="mine-lead">Add a device</h2></div>
           <p class="fine" id="invite-blurb"></p>
           <p id="mint-mine-row" class="flush">
             <button id="mint-mine" class="button">Create an invite</button>
@@ -84,12 +84,15 @@
         <section id="stats" hidden>
           <div class="split">
             <div class="stat">
-              <span class="stat-value" id="stat-accounts">0</span>
-              <span class="stat-label">Accounts</span>
-            </div>
-            <div class="stat">
               <span class="stat-value" id="stat-devices">0</span>
               <span class="stat-label">Devices</span>
+            </div>
+            <!-- Shown only when there is more than one. A person with a single
+                 sync group has no decision to make about it, and a stat reading
+                 "1" invites them to wonder what the other one would be. -->
+            <div class="stat" id="stat-groups-block" hidden>
+              <span class="stat-value" id="stat-groups">0</span>
+              <span class="stat-label">Sync groups</span>
             </div>
             <div class="stat">
               <span class="stat-value" id="stat-stored">0</span>
@@ -99,12 +102,12 @@
         </section>
 
         <div class="card">
-          <div class="card-head"><h2>Your accounts</h2></div>
+          <div class="card-head"><h2>Your devices</h2></div>
           <div id="my-accounts-shell" class="scroller" hidden>
             <table class="listing static">
               <thead>
                 <tr>
-                  <th>Account</th>
+                  <th>Sync group</th>
                   <th>Devices</th>
                   <th>Used</th>
                   <th>Created</th>
@@ -136,9 +139,9 @@
             <a class="button ghost small" href="/console/relay">Operator console →</a>
           </div>
           <p class="fine flush">
-            Everybody's accounts, invites for people who have not signed in,
+            Everybody's devices, invites for people who have not signed in,
             quotas and deletions are on their own page. Nothing there is needed
-            to use your own account.
+            to use your own devices.
           </p>
         </div>
       </section>

@@ -31,7 +31,7 @@
 
       <h1>Operator console</h1>
       <p class="lede">
-        Everybody on this relay, and every account on it. It carries their data
+        Everybody on this relay, and every device on it. It carries their data
         between their devices and cannot read any of it.
       </p>
 
@@ -41,7 +41,7 @@
           <div class="card-head"><h2>Sign in</h2></div>
           <p class="fine">
             This page is for whoever runs this relay. Signing in gives no access
-            to what is inside anybody's accounts — this server holds no key, and
+            to what is inside anybody's devices — this server holds no key, and
             there is none to give.
           </p>
           <p class="flush"><a class="button" href="/admin/login">Sign in</a></p>
@@ -65,7 +65,7 @@
         <div class="card feature">
           <div class="card-head"><h2>This relay is not yours to run</h2></div>
           <p class="fine">
-            This page belongs to whoever set this relay up. Your own accounts,
+            This page belongs to whoever set this relay up. Your own devices,
             devices and invites are on your console, and nothing here is needed
             to use them.
           </p>
@@ -84,7 +84,7 @@
             </div>
             <div class="stat">
               <span class="stat-value" id="stat-accounts">0</span>
-              <span class="stat-label">Accounts</span>
+              <span class="stat-label">Sync groups</span>
             </div>
             <div class="stat">
               <span class="stat-value" id="stat-stored">0</span>
@@ -101,7 +101,7 @@
               <thead>
                 <tr>
                   <th>Person</th>
-                  <th>Accounts</th>
+                  <th>Groups</th>
                   <th>Used</th>
                   <th>Last seen</th>
                   <th>Actions</th>
@@ -116,7 +116,7 @@
         <div class="card">
           <div class="card-head"><h2>Invite somebody who has not signed in</h2></div>
           <p class="fine">
-            An invite creates one account. Somebody who signs in here can get
+            An invite sets up one person's first device, and creates the sync group it syncs into. Somebody who signs in here can get
             their own; this is for handing to somebody who will not.
           </p>
           <p class="flush">
@@ -128,7 +128,7 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>Accounts</h2></div>
+          <div class="card-head"><h2>Sync groups</h2></div>
           <p class="fine">
             Everything this relay knows: an identifier, a device count, some
             bytes. It holds no key, so there is nothing else for it to know —
@@ -139,7 +139,7 @@
             <table class="listing">
               <thead>
                 <tr>
-                  <th>Account</th>
+                  <th>Sync group</th>
                   <th>Owner</th>
                   <th>Devices</th>
                   <th>Used</th>

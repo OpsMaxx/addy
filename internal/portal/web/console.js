@@ -20,8 +20,8 @@ async function loadMine(canMint) {
 
   // An operator reading "ask whoever runs it" is being told to ask themselves.
   $('no-mine-text').textContent = canMint
-    ? 'You have no accounts on this relay yet. Create an invite above, then paste it into OpsMaxx along with this relay’s address.'
-    : 'You have no accounts on this relay yet. Ask whoever runs this relay for an invite, then paste it into OpsMaxx along with this relay’s address.'
+    ? 'No devices on this relay yet. Create an invite above, then paste it into OpsMaxx along with this relay’s address to set up your first one.'
+    : 'No devices on this relay yet. Ask whoever runs this relay for an invite, then paste it into OpsMaxx along with this relay’s address to set up your first one.'
 
   let devices = 0
   let used = 0
@@ -33,11 +33,15 @@ async function loadMine(canMint) {
     body.append(tr)
   }
 
-  // The whole of what this relay knows about you, in three numbers. Counted
-  // from the same rows the table below shows, so the two cannot disagree.
-  $('stat-accounts').textContent = String(accounts.length)
+  // DEVICES ARE WHAT A PERSON HAS; a sync group is an implementation detail
+  // they only need when they have two. Counted from the same rows the table
+  // below shows, so the two cannot disagree.
   $('stat-devices').textContent = String(devices)
   $('stat-stored').textContent = bytes(used)
+  $('stat-groups').textContent = String(accounts.length)
+  $('stat-groups-block').hidden = accounts.length < 2
+
+  return accounts.length
 }
 
 /**
@@ -54,10 +58,33 @@ async function loadMine(canMint) {
  * answer — it offers a capability that no action of the reader's can unlock,
  * and leaves them hunting for the setting that would.
  */
-function wireMyInvite(canMint) {
-  $('invite-blurb').textContent = canMint
-    ? 'An invite creates one account, and only its first device needs one. Every machine after that is added by pairing from one that already works — both apps open, one shows a code, and you check the same seven emoji appear on each.'
-    : 'An invite creates one account, and this relay does not hand them out automatically. Ask whoever runs it. Every machine after your first is added by pairing, which needs nothing from them.'
+function wireMyInvite(canMint, groups) {
+  // WHAT AN INVITE DOES DEPENDS ON WHETHER YOU ALREADY HAVE A DEVICE, and
+  // saying only one of the two is how somebody ends up with two sets of
+  // devices that cannot see each other.
+  //
+  // With nothing yet, an invite sets up your first device — that is the
+  // sign-up, and it is what the word means to most people asking for one.
+  //
+  // With a device already, the way to add another is PAIRING, which needs no
+  // invite and no operator. Spending a second invite does not add to what you
+  // have: it starts a separate group with its own key, and nothing syncs
+  // between the two. The relay cannot merge them afterwards, because it holds
+  // no key to either.
+  const first = groups === 0
+  $('mine-lead').textContent = first ? 'Set up your first device' : 'Add another device'
+  $('invite-blurb').textContent = first
+    ? (canMint
+        ? 'An invite sets up your first device on this relay and creates the account it syncs into. Paste it into OpsMaxx together with this relay’s address.'
+        : 'Your first device needs an invite, and this relay does not hand them out automatically — ask whoever runs it. You paste it into OpsMaxx together with this relay’s address.')
+    : 'Add it by pairing from a device you already have: open OpsMaxx on both, one shows a code, and you check that the same seven emoji appear on each. No invite, and nothing to ask anybody for.'
+
+  // Pairing is the answer once there is something to pair with, so the button
+  // would be offering the wrong one of the two.
+  if (!first) {
+    $('mint-mine-row').remove()
+    return
+  }
 
   if (!canMint) {
     $('mint-mine-row').remove()
@@ -78,12 +105,20 @@ async function main() {
 
   const canMint = me.operator || me.signup === 'open'
   $('mine').hidden = false
-  wireMyInvite(canMint)
 
   if (me.operator) $('operator-door').hidden = false
   else $('operator-door').remove()
 
-  await loadMine(canMint).catch(fail)
+  // The lead card cannot be written until the count is known, so the load
+  // happens first and the card is wired from its answer. A card that rendered
+  // "set up your first device" and then corrected itself would be worse than
+  // one that waits.
+  const groups = await loadMine(canMint).catch((err) => {
+    fail(err)
+    return null
+  })
+  if (groups === null) return
+  wireMyInvite(canMint, groups)
 }
 
 void main()
