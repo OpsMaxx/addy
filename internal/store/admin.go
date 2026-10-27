@@ -25,9 +25,12 @@ import (
 // a last-seen time, which is what the threat model concedes the server knows.
 type AccountSummary struct {
 	AccountID string
-	// Whoever owns it, or "" for an account nobody has claimed — which is
-	// every account registered with an invite that named nobody, and every
-	// account that predates the users table.
+	// Whoever owns it, named the way the console names people — email, else
+	// the provider's display name, else their user id — or "" for an account
+	// nobody has claimed, which is every account registered with an invite
+	// that named nobody, and every account that predates the users table. The
+	// fallback is what keeps "" meaning only that: a provider that sends no
+	// email used to make an owned group look exactly like an ownerless one.
 	OwnerEmail string
 	CreatedAt  time.Time
 	Devices    int
@@ -44,7 +47,7 @@ func (d *DB) Accounts(ctx context.Context) ([]AccountSummary, error) {
 		       coalesce((SELECT sum(length(body)) FROM objects o WHERE o.account_id = a.account_id), 0)
 		     + coalesce((SELECT sum(length(wire)) FROM roster_entries r WHERE r.account_id = a.account_id), 0),
 		       coalesce((SELECT max(updated_at) FROM objects o WHERE o.account_id = a.account_id), 0),
-		       coalesce((SELECT u.email FROM account_owners w
+		       coalesce((SELECT coalesce(nullif(u.email, ''), nullif(u.name, ''), u.user_id) FROM account_owners w
 		                   JOIN users u ON u.user_id = w.user_id
 		                  WHERE w.account_id = a.account_id), '')
 		  FROM accounts a

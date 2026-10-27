@@ -2,10 +2,12 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // THE BOUNDARY, ASSERTED RATHER THAN DOCUMENTED. An admin holds availability
@@ -138,6 +140,61 @@ func TestTheAdminBoundaryIsPublished(t *testing.T) {
 	} {
 		if !strings.Contains(doc, must) {
 			t.Errorf("docs/ADMIN.md does not state %q", must)
+		}
+	}
+}
+
+// AN EMPTY OWNER MEANS NOBODY, AND ONLY THAT.
+//
+// The operator console prints an empty owner as "nobody" — a group registered
+// with an operator's invite, linked to no sign-in. It used to be the owner's
+// email and nothing else, so somebody whose provider sends no email owned a
+// group that read exactly like an ownerless one. Named the way the People
+// table names them instead: email, else name, else user id.
+func TestAnOwnerWithNoEmailIsStillNamed(t *testing.T) {
+	d := openTemp(t)
+	ctx := context.Background()
+
+	owners := map[string]string{} // account id -> the owner it must report
+	for _, who := range []struct{ subject, email, name string }{
+		{"has-email", "a@example.com", "Has Email"},
+		{"name-only", "", "Name Only"},
+		{"nothing", "", ""},
+	} {
+		u, err := d.UpsertUser(ctx, "https://issuer.example", who.subject, who.email, who.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tok, err := d.NewInviteFor(ctx, u.UserID, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := newAccountID(t)
+		if err := d.CreateAccount(ctx, id, make([]byte, 32), tok); err != nil {
+			t.Fatal(err)
+		}
+		owners[id] = map[string]string{"has-email": "a@example.com", "name-only": "Name Only", "nothing": u.UserID}[who.subject]
+	}
+	anon, err := d.NewInviteFor(ctx, "", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nobody := newAccountID(t)
+	if err := d.CreateAccount(ctx, nobody, make([]byte, 32), anon); err != nil {
+		t.Fatal(err)
+	}
+	owners[nobody] = ""
+
+	got, err := d.Accounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(owners) {
+		t.Fatalf("%d accounts, want %d", len(got), len(owners))
+	}
+	for _, a := range got {
+		if a.OwnerEmail != owners[a.AccountID] {
+			t.Errorf("account %s reports owner %q, want %q", a.AccountID, a.OwnerEmail, owners[a.AccountID])
 		}
 	}
 }
