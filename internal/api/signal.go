@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -182,6 +183,13 @@ func (s *Server) signal(w http.ResponseWriter, r *http.Request, a authedRequest)
 
 	select {
 	case frame := <-ch:
+		// Re-checked on waking: a revoke that landed while this poll was
+		// parked must not be answered with the frame. The frame was this
+		// device's, so nobody else loses it.
+		if err := s.auth.stillServing(a); err != nil {
+			s.fail(w, http.StatusUnauthorized, err)
+			return
+		}
 		s.ok(w, signalFrame{Frame: base64.StdEncoding.EncodeToString(frame)})
 	case <-time.After(s.pollWait()):
 		// An empty 204 rather than an error: nothing arrived, which is not a
@@ -285,9 +293,13 @@ func (s *Server) pairRendezvous(w http.ResponseWriter, r *http.Request) {
 				"or the relay restarted -- start again on the device showing the code"))
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxUnauthBody+1))
 	if err != nil {
 		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(body) > maxUnauthBody {
+		s.fail(w, http.StatusRequestEntityTooLarge, fmt.Errorf("a pairing frame is at most %d bytes", maxUnauthBody))
 		return
 	}
 

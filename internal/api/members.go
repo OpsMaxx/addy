@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/opsmaxx/addy/internal/protocol"
+	"github.com/opsmaxx/addy/internal/store"
 )
 
 // Who is on a roster, as far as the relay acts on it.
@@ -54,8 +55,11 @@ func (s *Server) standing(ctx context.Context, account string, acct protocol.Acc
 		return strangerKey, err
 	}
 	present, removed, err := protocol.Members(chain, acct)
+	if err == nil {
+		err = s.checkSigned(ctx, account, acct, chain)
+	}
 	if err != nil {
-		s.Log.Warn("a stored roster does not read; no device on it can log in", "account", account, "err", err)
+		s.Log.Warn("a stored roster does not verify; no device on it can log in", "account", account, "err", err)
 		return strangerKey, nil
 	}
 	for _, d := range present {
@@ -137,7 +141,8 @@ func (s *Server) appendEntry(ctx context.Context, a authedRequest, seq uint64, w
 	if err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("the stored roster does not read: %w", err)
 	}
-	if _, _, err := protocol.Members(append(chain[:len(chain):len(chain)], wire...), acct); err != nil {
+	next := append(chain[:len(chain):len(chain)], wire...)
+	if _, _, err := protocol.Members(next, acct); err != nil {
 		// A sequence number already taken is somebody else appending first,
 		// and stays the 409 a client re-reads the chain on -- not a 400 that
 		// tells it the entry it built was nonsense.
@@ -146,7 +151,6 @@ func (s *Server) appendEntry(ctx context.Context, a authedRequest, seq uint64, w
 		}
 		return http.StatusBadRequest, fmt.Errorf("that entry does not extend this roster: %w", err)
 	}
-
 	member := false
 	for _, d := range before {
 		member = member || bytes.Equal(d.PubSign, a.Device)
@@ -154,8 +158,8 @@ func (s *Server) appendEntry(ctx context.Context, a authedRequest, seq uint64, w
 	if !member {
 		// THE ONE APPEND FROM OFF THE ROSTER: a recovering device adding
 		// itself, signed by the root key the phrase derives. The relay holds
-		// that key's public half from registration, so this is the one entry
-		// whose signature it CAN check -- and must, since nothing else about
+		// that key's public half from registration, so this entry is one it
+		// can check even without the epoch-1 key -- and must, since nothing about
 		// the caller is vouched for.
 		root, err := s.DB.RootSignPub(ctx, a.Account)
 		if err != nil {
@@ -168,11 +172,103 @@ func (s *Server) appendEntry(ctx context.Context, a authedRequest, seq uint64, w
 		}
 	}
 
+	// AND ITS SIGNATURE, when the relay can check one. Structure alone let a
+	// member append an add with a junk signature: the relay stored it, gave
+	// the named key a full session, and every client's verification failed
+	// on that entry for ever -- an append-only chain, bricked, with a relay
+	// side door that outlived any revocation.
+	if err := s.checkSigned(ctx, a.Account, acct, next); err != nil {
+		return http.StatusBadRequest, fmt.Errorf("that entry does not verify: %w", err)
+	}
+
 	if err := s.DB.AppendRoster(ctx, a.Account, seq, wire); err != nil {
 		return statusFor(err), err
 	}
 	s.auth.settle(a.Account, e)
 	return 0, nil
+}
+
+// checkSigned runs the client's own VerifyChain over a chain, when the relay
+// holds the account's epoch-1 key -- which is the one key it was missing: the
+// root key it has had since registration, and every later epoch's key is
+// established inside the chain itself.
+//
+// An account whose devices have not supplied that key is checked by structure
+// alone (Members), as before; nil here says only that nothing more was
+// possible.
+func (s *Server) checkSigned(ctx context.Context, account string, acct protocol.AccountID, chain []byte) error {
+	root, epoch1, err := s.DB.SignKeys(ctx, account)
+	if errors.Is(err, store.ErrNoAccount) || (err == nil && epoch1 == nil) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = protocol.VerifyChain(chain, acct, root, epoch1, nil)
+	return err
+}
+
+type epoch1Request struct {
+	Epoch1SignPub string `json:"epoch1_sign_pub"` // hex
+}
+
+// setEpoch1 records the account's epoch-1 signing key, for an account that
+// registered before the relay asked for it.
+//
+// SELF-VALIDATING, so it does not matter who sends it: it is accepted only if
+// the whole stored chain verifies under it, from the genesis entry it signed
+// onward. A wrong key fails that, and so does a chain already holding an
+// entry no client accepts -- in which case the account is bricked whatever
+// the relay does, and it says so rather than taking the key.
+func (s *Server) setEpoch1(w http.ResponseWriter, r *http.Request, a authedRequest) {
+	var req epoch1Request
+	if err := unmarshal(a.Body, &req); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	key, err := hex.DecodeString(req.Epoch1SignPub)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		s.fail(w, http.StatusBadRequest, errors.New("an epoch 1 key is 32 bytes of hex"))
+		return
+	}
+	var acct protocol.AccountID
+	copy(acct[:], mustDecode(a.Account))
+
+	s.auth.roster.Lock()
+	defer s.auth.roster.Unlock()
+	chain, err := s.DB.Roster(r.Context(), a.Account, 0)
+	if err != nil {
+		s.fail(w, statusFor(err), err)
+		return
+	}
+	root, _, err := s.DB.SignKeys(r.Context(), a.Account)
+	if err != nil {
+		s.fail(w, statusFor(err), err)
+		return
+	}
+	if _, err := protocol.VerifyChain(chain, acct, root, key, nil); err != nil {
+		s.fail(w, http.StatusBadRequest, fmt.Errorf("the stored roster does not verify under that key: %w", err))
+		return
+	}
+	if err := s.DB.SetEpoch1SignPub(r.Context(), a.Account, key); err != nil {
+		s.fail(w, statusFor(err), err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// stillServing re-checks, at the moment a long poll wakes, that the session it
+// was parked on has not been cut by a revoke since authed() let it in.
+// ponytail: a scan of every session; index by device if the map grows large.
+func (a *authState) stillServing(r authedRequest) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, v := range a.sessions {
+		if v.removed && v.account == r.Account && bytes.Equal(v.device, r.Device) {
+			return errors.New("this device has been removed from its sync group")
+		}
+	}
+	return nil
 }
 
 // settle applies a stored entry to the live sessions of the device it names.

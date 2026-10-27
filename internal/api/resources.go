@@ -1,9 +1,11 @@
 package api
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -17,6 +19,10 @@ type createAccountRequest struct {
 	Invite      string `json:"invite"`
 	Genesis     string `json:"genesis"` // base64 roster entry, body || sig
 	Escrow      string `json:"escrow"`  // base64
+	// Epoch1SignPub is AK_1.sign's public half, hex. Optional, so a client
+	// that predates it still registers; with it, the relay can verify every
+	// roster entry the account ever appends. See checkSigned.
+	Epoch1SignPub string `json:"epoch1_sign_pub,omitempty"`
 }
 
 // createAccount registers a client-asserted identity.
@@ -29,8 +35,7 @@ type createAccountRequest struct {
 // helps nobody and would make the account unreachable.
 func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 	var req createAccountRequest
-	if err := readJSON(r, &req); err != nil {
-		s.fail(w, http.StatusBadRequest, err)
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -50,6 +55,23 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The epoch-1 key, when sent, is checked against the genesis signature
+	// before anything is written: a key that does not verify the account's
+	// own first entry is a client bug, and storing it would refuse every
+	// append the account ever makes.
+	var epoch1 []byte
+	if req.Epoch1SignPub != "" {
+		epoch1, err = hex.DecodeString(req.Epoch1SignPub)
+		if err != nil || len(epoch1) != ed25519.PublicKeySize {
+			s.fail(w, http.StatusBadRequest, errors.New("an epoch 1 key is 32 bytes of hex"))
+			return
+		}
+		if _, err := protocol.VerifyChain(genesis, protocol.DeriveAccountID(rootPub), rootPub, epoch1, nil); err != nil {
+			s.fail(w, http.StatusBadRequest, fmt.Errorf("the genesis entry does not verify under that epoch 1 key: %w", err))
+			return
+		}
+	}
+
 	// Decoded BEFORE anything is written, and the three writes are one
 	// transaction: a failure part-way used to leave a spent invite and an
 	// account no device could log in to. See store.RegisterAccount.
@@ -63,6 +85,15 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 	if err := s.DB.RegisterAccount(r.Context(), req.Account, rootPub, req.Invite, genesis, escrow); err != nil {
 		s.fail(w, statusFor(err), err)
 		return
+	}
+	if epoch1 != nil {
+		// Not fatal: the account exists and the invite is spent, so failing
+		// here would leave the device nothing to retry. Without the key the
+		// relay checks appends by structure, and POST /v1/roster/epoch1
+		// supplies it later.
+		if err := s.DB.SetEpoch1SignPub(r.Context(), req.Account, epoch1); err != nil {
+			s.Log.Warn("could not record the epoch 1 key", "account", req.Account, "err", err)
+		}
 	}
 
 	s.Log.Info("account created", "account", req.Account)
@@ -185,6 +216,14 @@ func (s *Server) putObject(w http.ResponseWriter, r *http.Request, a authedReque
 // old epoch's copy left behind would still be charged against the quota this
 // call exists to free.
 func (s *Server) deleteObject(w http.ResponseWriter, r *http.Request, a authedRequest) {
+	// NEVER THE ESCROW, at any epoch. It is what a recovery opens when every
+	// device is gone, so deleting it is deleting the recovery phrase's only
+	// use -- and recovery's own rollback check reads the epoch past the
+	// current one, so an old epoch's copy is load-bearing too.
+	if r.PathValue("name") == "escrow" {
+		s.fail(w, http.StatusForbidden, errors.New("the escrow is what recovery opens, and it is never deleted"))
+		return
+	}
 	var epoch *uint64
 	if raw := r.URL.Query().Get("epoch"); raw != "" {
 		e, err := strconv.ParseUint(raw, 10, 64)

@@ -133,8 +133,17 @@ type challengeResponse struct {
 
 func (s *Server) challenge(w http.ResponseWriter, r *http.Request) {
 	var req challengeRequest
-	if err := readJSON(r, &req); err != nil {
-		s.fail(w, http.StatusBadRequest, err)
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+	// Checked before anything is stored: this route is unauthenticated, and a
+	// record holding whatever strings a caller sent is memory anybody can fill.
+	if b, err := hex.DecodeString(req.Account); err != nil || len(b) != protocol.AccountIDLen {
+		s.fail(w, http.StatusBadRequest, errors.New("an account id is 16 bytes of hex"))
+		return
+	}
+	if b, err := hex.DecodeString(req.Device); err != nil || len(b) != ed25519.PublicKeySize {
+		s.fail(w, http.StatusBadRequest, errors.New("a device key is 32 bytes of hex"))
 		return
 	}
 
@@ -176,8 +185,7 @@ type loginResponse struct {
 // that survives a failed attempt is a nonce an attacker can grind against.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if err := readJSON(r, &req); err != nil {
-		s.fail(w, http.StatusBadRequest, err)
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -419,12 +427,30 @@ func bearer(r *http.Request) (string, bool) {
 	return v[len(prefix):], true
 }
 
-func readJSON(r *http.Request, v any) error {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+// maxUnauthBody bounds the routes that take a body before anybody is
+// authenticated. Their bodies are a few hundred bytes -- a registration with
+// its escrow is the largest -- and eight megabytes per anonymous request is a
+// lot of memory to hand whoever asks.
+const maxUnauthBody = 64 << 10
+
+// readJSON reads an unauthenticated route's body, or answers for it: 413 when
+// it is over maxUnauthBody (one byte past, so an oversized body is seen rather
+// than cut and then misread), 400 when it is not JSON.
+func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxUnauthBody+1))
 	if err != nil {
-		return err
+		s.fail(w, http.StatusBadRequest, err)
+		return false
 	}
-	return json.Unmarshal(body, v)
+	if len(body) > maxUnauthBody {
+		s.fail(w, http.StatusRequestEntityTooLarge, fmt.Errorf("a request body here is at most %d bytes", maxUnauthBody))
+		return false
+	}
+	if err := json.Unmarshal(body, v); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return false
+	}
+	return true
 }
 
 // mustDecode returns nil for anything that is not hex, and the callers treat a

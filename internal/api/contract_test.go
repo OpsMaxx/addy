@@ -103,7 +103,9 @@ func TestAnOversizedBodyIsRefusedAsTooLarge(t *testing.T) {
 func TestAClientOnAnotherProtocolIsRefused(t *testing.T) {
 	srv, _ := instance(t)
 	post := func(header string) int {
-		req, _ := http.NewRequest("POST", srv.URL+"/v1/auth/challenge", strings.NewReader(`{}`))
+		// A well-formed challenge: the route checks its fields now.
+		body := `{"account":"` + strings.Repeat("ab", 16) + `","device":"` + strings.Repeat("cd", 32) + `"}`
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/auth/challenge", strings.NewReader(body))
 		if header != "" {
 			req.Header.Set("X-Addy-Protocol", header)
 		}
