@@ -16,6 +16,7 @@ type fakeIDP struct {
 	server   *httptest.Server
 	subject  string
 	email    string
+	name     string
 	lastForm map[string]string
 }
 
@@ -45,7 +46,7 @@ func newIDP(t *testing.T, subject, email string) *fakeIDP {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"sub": idp.subject, "email": idp.email})
+		_ = json.NewEncoder(w).Encode(map[string]string{"sub": idp.subject, "email": idp.email, "name": idp.name})
 	})
 
 	idp.server = httptest.NewServer(mux)
@@ -557,5 +558,59 @@ func TestTheOperatorChangesTheSignupPolicyFromTheConsole(t *testing.T) {
 	}
 	if got := a.SignupInForce(context.Background()); got != SignupClosed {
 		t.Errorf("a member's refused write changed the policy to %q", got)
+	}
+}
+
+// THE SIGN-IN LANDS ON A PAGE, AND THE PAGE CAN NAME WHO ARRIVED.
+//
+// Two defects a person with no email met one after the other. The callback
+// sent them to /admin, an alias that only the -ui portal answered — so on a
+// default install a sign-in that had worked ended on a 404. And once they
+// reached the console, the bar named them by a raw user id, because `me`
+// carried an email they did not have and not the name the provider did send.
+func TestTheSignInLandsOnTheConsoleAndNamesSomebodyWithNoEmail(t *testing.T) {
+	idp := newIDP(t, "no-email", "")
+	idp.name = "Ada Lovelace"
+	a := authFor(t, idp, newStore())
+	mux := http.NewServeMux()
+	a.Routes(mux, nil)
+
+	where, err := a.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := where[strings.Index(where, "state=")+len("state="):]
+	if amp := strings.Index(state, "&"); amp >= 0 {
+		state = state[:amp]
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/callback?state="+state+"&code=c", nil))
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/console" {
+		t.Fatalf("the callback answered %d to %q; it has to land on /console, the page that is served wherever this route is",
+			rec.Code, rec.Header().Get("Location"))
+	}
+	var sid string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == cookieName {
+			sid = c.Value
+		}
+	}
+	if sid == "" {
+		t.Fatal("the callback set no session cookie")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/v1/me", nil)
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: sid})
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	var me struct {
+		SignedIn bool   `json:"signedIn"`
+		Name     string `json:"name"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &me); err != nil {
+		t.Fatal(err)
+	}
+	if !me.SignedIn || me.Name != "Ada Lovelace" {
+		t.Fatalf("me = %s; the bar falls back to the name when there is no email, so it has to be there", rec.Body.String())
 	}
 }

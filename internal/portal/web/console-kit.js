@@ -85,11 +85,18 @@ export function showSignedOut(note) {
  * left open then shows a signed-in console over a server that has never heard
  * of it. The first thing clicked used to answer "sign in first" in small text
  * at the bottom of a page still naming the account it thought was signed in.
+ *
+ * A RESTART IS NOT THE ONLY CAUSE, and naming only it misleads the one reader
+ * for whom it matters most. Blocking somebody ends their live sessions on the
+ * spot (EndAllFor in internal/operator), so a blocked member's open tab lands
+ * here too — and telling them the relay restarted sends them to sign in again
+ * and be refused with no idea why. The 401 carries no reason, deliberately, so
+ * every cause is named and the one that needs a person comes last.
  */
 function sessionEnded() {
   clearProblem()
   showSignedOut(
-    'Your session ended — this relay was restarted, or you were signed in for more than eight hours. Sign in again to carry on.'
+    'You have been signed out. This relay may have restarted, or you were signed in for more than eight hours — sign in again to carry on. If signing in is refused, whoever runs this relay has signed you out or no longer lets this account sign in; ask them.'
   )
 }
 

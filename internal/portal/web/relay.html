@@ -31,8 +31,8 @@
 
       <h1>Operator console</h1>
       <p class="lede">
-        Everybody on this relay, and every device on it. It carries their data
-        between their devices and cannot read any of it.
+        Everybody on this relay, and every sync group on it. It carries their
+        data between their devices and cannot read any of it.
       </p>
 
       <section id="signed-out" hidden>
@@ -135,26 +135,45 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h2>Invite somebody who has not signed in</h2></div>
+          <div class="card-head"><h2>Invite somebody who will not sign in</h2></div>
           <p class="fine">
-            An invite sets up one person's first device, and creates the sync group it syncs into. Somebody who signs in here can get
-            their own; this is for handing to somebody who will not.
+            An invite sets up one person's first device, and creates the sync
+            group it syncs into. Somebody who can sign in here should get their
+            own from their console instead; this is for handing to somebody who
+            will not.
+          </p>
+          <!-- SAID BEFORE THE BUTTON, because it cannot be fixed after. An
+               invite minted here names nobody, so the group it creates has no
+               owner — and nothing can link it to a sign-in later, because the
+               relay never learns who the invite was handed to. If that person
+               does sign in one day, their console sees no group of theirs and
+               offers to set up a first device, which would be a second group
+               their devices cannot see. Their console warns them too. -->
+          <p class="fine">
+            <strong>The sync group this creates belongs to no sign-in.</strong>
+            If that person signs in here later, it will not appear on their
+            console, and they cannot delete it themselves — only you can, from
+            the list below, where it shows with no owner. Their console tells
+            them to keep pairing new machines rather than create an invite of
+            their own, which would start a second group their devices cannot
+            see.
           </p>
           <p class="flush">
             <button id="mint" class="button">Create an invite</button>
             <span id="mint-note" class="fine"></span>
           </p>
           <code id="invite" class="token" hidden></code>
-                    <p class="fine" id="invite-plain-label" hidden>Or paste this code into OpsMaxx by hand:</p>
+          <p class="fine" id="invite-plain-label" hidden>Or paste this code into OpsMaxx by hand:</p>
           <code id="invite-plain" class="token" hidden></code>
-<p id="invite-warn" class="fine flush" hidden>Copy it now — shown once, works once.</p>
+          <p id="invite-warn" class="fine flush" hidden>Copy it now — shown once, works once.</p>
         </div>
 
         <div class="card">
           <div class="card-head"><h2>Sync groups</h2></div>
           <p class="fine">
-            Everything this relay knows: an identifier, a device count, some
-            bytes. It holds no key, so there is nothing else for it to know —
+            Everything this relay knows: an identifier, a count of roster
+            entries, some bytes. It holds no key, so there is nothing else for
+            it to know —
             not a device name, not a server, not a file. Devices are added and
             removed from OpsMaxx, where the keys are.
           </p>
@@ -191,7 +210,7 @@
             </table>
           </div>
           <div id="no-accounts" class="empty" hidden>
-            <p><strong>No accounts yet</strong></p>
+            <p><strong>No sync groups yet</strong></p>
             <p class="fine flush">
               Nobody has spent an invite on this relay. Create one above and
               hand it over, or sign in and start your own.

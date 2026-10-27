@@ -180,7 +180,10 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 			Secure:   true,
 			MaxAge:   int(sessionTTL / time.Second),
 		})
-		http.Redirect(w, r, "/admin", http.StatusFound)
+		// Straight to the page, not via the /admin alias: one hop fewer, and
+		// the page is served wherever this route is (see pagesFor in
+		// internal/server), so the sign-in never lands on a 404.
+		http.Redirect(w, r, "/console", http.StatusFound)
 	})
 
 	mux.HandleFunc("POST /admin/logout", func(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +205,9 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		body := map[string]any{
 			"signedIn": ok,
 			"email":    who.Email,
+			// The bar's fallback when there is no email — without it, a person
+			// whose provider sends none was shown as a raw user id.
+			"name": who.Name,
 			// THE PAGE NAMES PEOPLE BY IDENTITY, NOT BY EMAIL. An OIDC
 			// provider need not return an email at all, and when it does not,
 			// every person on the relay compares equal to every other — which

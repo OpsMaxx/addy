@@ -41,9 +41,10 @@
         <div class="card feature">
           <div class="card-head"><h2>Sign in</h2></div>
           <p class="fine">
-            Signing in lets you see the devices you have on this
-            relay. It gives no access to what is inside them — this server
-            holds no key, and there is none to give.
+            Signing in lets you create the invite that sets up your first
+            device, and see the sync group your devices share on this relay.
+            It gives no access to what is inside them — this server holds no
+            key, and there is none to give.
           </p>
           <p class="flush"><a class="button" href="/admin/login">Sign in</a></p>
         </div>
@@ -79,6 +80,25 @@
             Hand it over the way you would a password.
           </p>
 
+          <!-- THE GROUP THAT IS YOURS AND IS NOT LISTED. An invite from the
+               operator console names nobody, because it is minted for somebody
+               who may never sign in — so the group it creates has no owner, and
+               nothing links it to this person when they do sign in later. They
+               arrive here to "set up your first device", and pressing it would
+               start a second, separate group their devices cannot see. Nothing
+               on this side can tell the two situations apart, so it is said to
+               everybody who has no group of their own. -->
+          <p id="operator-made" class="fine flush" hidden>
+            <strong>Already using OpsMaxx with this relay?</strong> If whoever
+            runs it handed you an invite before you ever signed in here, your
+            devices are on a sync group that is not linked to this sign-in, so
+            it is not listed below. Do not create an invite: it would start a
+            second group that your devices cannot see. Add machines by pairing
+            from one you already have — <em>Sync &amp; devices</em> in OpsMaxx,
+            then <em>Add another device</em>. Only whoever runs this relay can
+            see or delete that group.
+          </p>
+
           <!-- THE SECOND DEVICE, and the honest answer to "there is no option
                to add one here".
 
@@ -91,19 +111,26 @@
                once, with the button that puts it on the clipboard, beside the
                steps in the order the two machines actually perform them.
 
-               No `opsmaxx://` link is offered here on purpose. A `sync` link
-               without an invite is refused by the app, and one WITH a fresh
-               invite would start a SECOND sync group rather than join this one.
-               Only the machine already holding the account can mint a `pair`
-               link, and that machine is not this server. -->
+               The `opsmaxx://` link below carries the address and nothing
+               else. One WITH a fresh invite would start a SECOND sync group
+               rather than join this one, and only a machine already holding the
+               group's key can mint a `pair` link — which is not this server.
+
+               THE STEPS NAME WHAT THE APP SHOWS, word for word: the page is
+               "Sync & devices", the button on the machine you have is "Show a
+               code on this device", the choice on the new one is "I already use
+               OpsMaxx on another machine", then "Type a code from another
+               device" and "Join". One pairing code — it carries the pairing id
+               inside it, so there is nothing second to type. -->
           <div id="pair-steps" hidden>
             <ol class="steps">
               <li>
                 <strong>Start on a machine you already use.</strong> Open
-                <em>Sync &amp; devices</em> in OpsMaxx there, choose
-                <em>Add another device</em>, then
-                <em>Show a code on this device</em>. Leave that window open —
-                the code lives only while it is on screen.
+                <em>Sync &amp; devices</em> in OpsMaxx there and, under
+                <em>Add another device</em>, choose
+                <em>Show a code on this device</em>. It shows one pairing code.
+                Leave that window open — the code works only while it is on
+                screen.
               </li>
               <li>
                 <strong>On the new machine</strong>, install OpsMaxx and choose
@@ -132,10 +159,12 @@
                 </p>
               </li>
               <li>
-                <strong>Type the code into the new machine</strong>, then check
-                that the same seven emoji appear on both and confirm on each.
-                That comparison is the whole security of pairing; nothing is
-                added until both sides agree.
+                <strong>On the new machine, choose
+                <em>Type a code from another device</em></strong>, paste the
+                pairing code and press <em>Join</em>. Then check that the same
+                seven emoji appear on both and answer <em>They match</em> on
+                each. That comparison is the whole security of pairing; nothing
+                is added until both sides agree.
               </li>
             </ol>
 
@@ -149,13 +178,14 @@
               There is no primary device, and this relay could not nominate one
               if there were: it cannot tell your machines apart, cannot read
               their names, and does not record when any of them was last awake.
-              Every device holds the same account key, so the one to start from
-              is whichever one you are sitting at.
+              Every device holds the same sync-group key, so the one to start
+              from is whichever one you are sitting at.
             </p>
             <p class="fine">
               <strong>If you cannot reach any of them</strong>, the recovery
               phrase you wrote down when you set up your first device restores
-              this account on a new machine without needing an old one. It is
+              this sync group on a new machine without needing an old one —
+              choose <em>My other devices are gone</em> there. It is
               what a primary device would have been for, and it cannot be lost
               with a laptop. Without a device and without the phrase there is
               no way back into this group — what is here stays sealed, and
@@ -198,9 +228,9 @@
                feature lived. It is not: this is. -->
           <div class="card-head"><h2>Your sync groups</h2></div>
           <p class="fine">
-            A sync group is one set of devices sharing one key. Most people
-            have exactly one and never need the words; you have one per invite
-            you have ever spent, and nothing syncs between two of them.
+            A sync group is one set of devices sharing one key. You have at
+            most one here: this relay refuses a second to somebody who already
+            has one, because nothing would sync between the two.
           </p>
           <div id="my-accounts-shell" class="scroller" hidden>
             <table class="listing static">
@@ -231,9 +261,9 @@
           </p>
           <p class="fine">
             <strong>Device names are not shown here, and cannot be.</strong>
-            Each device's name is encrypted under your account key before it
-            reaches this relay, which holds no key — so the server can count
-            your devices and cannot read what any of them is called. Open
+            Each device's name is encrypted under your sync group's key before
+            it reaches this relay, which holds no key — so the server cannot
+            read what any of them is called, nor tell how many there are. Open
             <em>Sync &amp; devices</em> in OpsMaxx to see them by name, or to
             remove one.
           </p>
@@ -248,7 +278,7 @@
             <a class="button ghost small" href="/console/relay">Operator console →</a>
           </div>
           <p class="fine flush">
-            Everybody's devices, invites for people who have not signed in,
+            Everybody's sync groups, invites for people who will not sign in,
             quotas and deletions are on their own page. Nothing there is needed
             to use your own devices.
           </p>

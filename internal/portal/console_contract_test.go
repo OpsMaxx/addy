@@ -1,7 +1,9 @@
 package portal
 
 import (
+	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"regexp"
 	"sort"
@@ -371,5 +373,158 @@ func TestHiddenBeatsEveryDisplayRuleOnEveryPage(t *testing.T) {
 	if !found {
 		t.Error("portal.css has no unscoped `[hidden] { display: none !important }`.\n" +
 			"Without it every element the scripts hide goes on rendering.")
+	}
+}
+
+func TestTheLeadCardFollowsTheCountBothWays(t *testing.T) {
+	// The card was decided once at load and its losing half REMOVED. Deleting
+	// your only sync group then left no invite button anywhere, under an empty
+	// state saying "create an invite above"; and a device registering from
+	// OpsMaxx while the tab sat in the background left it offering a first
+	// device to somebody who had one. Both halves have to survive in the page
+	// and be repainted whenever the count is read again.
+	js := readWeb(t, "console.js")
+	for _, id := range []string{"mint-mine-row", "pair-steps", "operator-made"} {
+		if strings.Contains(js, `$('`+id+`').remove()`) {
+			t.Errorf("console.js removes #%s; a later load cannot bring it back", id)
+		}
+		if !regexp.MustCompile(`\$\('` + id + `'\)\.hidden = !?first`).MatchString(js) {
+			t.Errorf("console.js does not paint #%s from the count", id)
+		}
+	}
+	if !strings.Contains(js, "paintLead(await loadMine())") {
+		t.Error("deleting a sync group re-reads the count without repainting the card drawn from it")
+	}
+	for _, ev := range []string{"'focus'", "'visibilitychange'"} {
+		if !strings.Contains(js, "addEventListener("+ev) {
+			t.Errorf("console.js does not re-read on %s; a device registered in OpsMaxx is not noticed", ev)
+		}
+	}
+}
+
+func TestThePasswordIsAskedForBeforeTheMessageIsUsedUp(t *testing.T) {
+	// The page cannot know a message has a password until it holds the sealed
+	// blob, and fetching that is the POST that burns a one-time message. The
+	// field used to appear only after decryption failed — after the only
+	// chance to type into it.
+	page := readWeb(t, "paste.html")
+	row := regexp.MustCompile(`<div[^>]*id="password-row"[^>]*>`).FindString(page)
+	if row == "" {
+		t.Fatal("paste.html has no #password-row")
+	}
+	if bareHidden.MatchString(row) {
+		t.Errorf("#password-row starts hidden: %s", row)
+	}
+	if strings.Index(page, `id="password"`) > strings.Index(page, `id="reveal"`) {
+		t.Error("the password field comes after the button that burns the message")
+	}
+	if strings.Contains(readWeb(t, "paste.js"), "$('password-row').hidden") {
+		t.Error("paste.js toggles #password-row; it has to be there before the burn, not after")
+	}
+}
+
+func TestTheCopyUsesTheNamingContract(t *testing.T) {
+	// "Sync group" is the server's grouping, a roster entry is not a device,
+	// and the app's page is "Sync & devices" with one pairing code. Each
+	// phrase below shipped saying otherwise.
+	for _, c := range []struct{ file, phrase, why string }{
+		{"console.html", "one per invite", "the store refuses a second sync group to anybody who has one"},
+		{"console.html", "server can count", "the relay cannot count devices"},
+		{"console.html", "Type the code into the new machine", "name the app's button: Type a code from another device"},
+		{"relay.html", "every device on it", "the relay lists sync groups, not devices"},
+		{"relay.html", "a device count", "it is a roster-entry count"},
+		{"relay.html", "No accounts yet", "they are sync groups"},
+		{"relay.js", "existing account", "they are sync groups"},
+		{"relay.js", "Delete account", "they are sync groups"},
+		{"relay.js", "|| '—'", "a dash reads as 'no email' as easily as 'nobody'"},
+		{"index.html", "That creates your account", "it sets up a first device and a sync group"},
+		{"index.html", "needs an invite from whoever runs", "signing in gets you your own first-device invite"},
+		{"console-kit.js", "this relay was restarted, or you were signed in for more than eight hours. Sign in again to carry on.'", "a blocked member is told the relay restarted"},
+	} {
+		if strings.Contains(readWeb(t, c.file), c.phrase) {
+			t.Errorf("%s still says %q: %s", c.file, c.phrase, c.why)
+		}
+	}
+	for _, c := range []struct{ file, phrase string }{
+		{"console.html", "Sync &amp; devices"},
+		{"console.html", "Show a code on this device"},
+		{"console.html", "I already use OpsMaxx on another machine"},
+		{"console.html", "Type a code from another device"},
+		{"console.html", "pairing code"},
+		{"index.html", `href="/console"`},
+		{"console-kit.js", "no longer lets this account sign in"},
+		{"relay.html", "belongs to no sign-in"},
+		{"console.html", `id="operator-made"`},
+	} {
+		if !strings.Contains(readWeb(t, c.file), c.phrase) {
+			t.Errorf("%s no longer says %q", c.file, c.phrase)
+		}
+	}
+}
+
+// contrast is the WCAG 2 ratio between two #rrggbb colours.
+func contrast(t *testing.T, a, b string) float64 {
+	t.Helper()
+	lum := func(hex string) float64 {
+		var rgb [3]float64
+		for i := range rgb {
+			var v int
+			if _, err := fmt.Sscanf(hex[1+2*i:3+2*i], "%02x", &v); err != nil {
+				t.Fatalf("%q is not #rrggbb: %v", hex, err)
+			}
+			c := float64(v) / 255
+			if c <= 0.04045 {
+				rgb[i] = c / 12.92
+			} else {
+				rgb[i] = math.Pow((c+0.055)/1.055, 2.4)
+			}
+		}
+		return 0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]
+	}
+	x, y := lum(a), lum(b)
+	if x < y {
+		x, y = y, x
+	}
+	return (x + 0.05) / (y + 0.05)
+}
+
+func TestEveryThemeClearsAAWhereItWasMeasuredFailing(t *testing.T) {
+	// White on the dark theme's danger red was the Delete and Block hover at
+	// 3.35:1, and the light theme's faint text — table headers, stat labels —
+	// was 4.29:1 on the page. Both are text, so both need 4.5:1, in every one
+	// of the three places a theme is declared.
+	token := regexp.MustCompile(`(--[a-z-]+):\s*(#[0-9a-fA-F]{6})\b`)
+	themes := map[string]map[string]string{}
+	for _, r := range parseCSS(readWeb(t, "portal.css")) {
+		if !strings.HasPrefix(r.selector, ":root") && !strings.HasPrefix(r.selector, "@media (prefers-color-scheme") {
+			continue
+		}
+		vars := map[string]string{}
+		for _, m := range token.FindAllStringSubmatch(r.body, -1) {
+			vars[m[1]] = m[2]
+		}
+		themes[r.selector] = vars
+	}
+	if len(themes) != 3 {
+		t.Fatalf("the parser is wrong, not the code: found %d theme blocks, want 3", len(themes))
+	}
+	pairs := [][2]string{
+		{"--danger-ink", "--danger"},
+		{"--text-faint", "--bg-app"},
+		{"--text-faint", "--bg-card"},
+		{"--text-faint", "--bg-hover"},
+		{"--danger", "--bg-elevated"},
+	}
+	for sel, vars := range themes {
+		for _, p := range pairs {
+			fg, bg := vars[p[0]], vars[p[1]]
+			if fg == "" || bg == "" {
+				t.Errorf("%s does not declare %s and %s, so it inherits a pair measured for another theme", sel, p[0], p[1])
+				continue
+			}
+			if r := contrast(t, fg, bg); r < 4.5 {
+				t.Errorf("%s: %s %s on %s %s is %.2f:1, under 4.5:1", sel, p[0], fg, p[1], bg, r)
+			}
+		}
 	}
 }

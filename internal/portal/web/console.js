@@ -1,4 +1,4 @@
-// Your console: your accounts, your devices, your invite.
+// Your console: your sync group, your devices, your invite.
 //
 // Nothing on this page belongs to anybody else, whoever is reading it. An
 // operator sees exactly what a member sees, plus one link to a separate page.
@@ -18,6 +18,9 @@ async function loadMine() {
   $('stats').hidden = !some
   $('no-mine').hidden = some
 
+  // The card above is re-drawn from the same count on every load (see
+  // paintLead), so "above" is true whichever way the count went — including
+  // straight after the delete below took it to zero.
   $('no-mine-text').textContent =
     'Nothing of yours is on this relay yet. Create an invite above and paste it into OpsMaxx: that sets up your first device and creates the group it syncs into.'
 
@@ -54,7 +57,10 @@ async function loadMine() {
       try {
         clearProblem()
         await api(`/admin/v1/my/accounts/${encodeURIComponent(a.accountId)}`, { method: 'DELETE' })
-        await loadMine()
+        // The count is what the lead card is drawn from, so it is redrawn
+        // too: deleting your only group is exactly when the invite button has
+        // to come back.
+        paintLead(await loadMine())
       } catch (err) {
         fail(err)
       }
@@ -83,20 +89,26 @@ async function loadMine() {
 }
 
 /**
- * The invite button.
+ * The lead card, painted from the number of sync groups this person has.
  *
- * A member may mint their own invite only where signup is open; the operator
- * always may. The SERVER enforces that — this is an affordance, not a boundary.
- * Which is exactly why the failure mode mattered: the button used to be hidden
- * by CSS and left unwired, so the one time the CSS did not hold, a member got a
- * button that did nothing at all.
+ * A member may always mint their own first-device invite; the operator may
+ * mint one for anybody. The SERVER enforces both — this is an affordance, not
+ * a boundary.
  *
- * So: the button is REMOVED where it may not be used, and the prose says what
- * to do instead. A disabled button would be a smaller change and a worse
- * answer — it offers a capability that no action of the reader's can unlock,
- * and leaves them hunting for the setting that would.
+ * IT IS PAINTED, NOT BUILT ONCE. The count changes under an open page in both
+ * directions: deleting your only group takes it to zero, and the invite you
+ * just made registers a device from OpsMaxx while this tab sits in the
+ * background. The card used to be decided once at load and the losing half
+ * REMOVED — so after a delete there was no invite button left to press, under
+ * an empty state saying "create an invite above", and after a registration it
+ * went on offering a first device to somebody who had one. So both halves
+ * stay in the page and are hidden, and this runs after every load.
+ *
+ * Hiding is safe to rely on now: `[hidden]` beats every display rule in the
+ * stylesheet, and console_contract_test.go fails the build if that stops
+ * being true.
  */
-function wireMyInvite(groups) {
+function paintLead(groups) {
   // WHAT AN INVITE DOES DEPENDS ON WHETHER YOU ALREADY HAVE A DEVICE, and
   // saying only one of the two is how somebody ends up with two sets of
   // devices that cannot see each other.
@@ -105,46 +117,32 @@ function wireMyInvite(groups) {
   // sign-up, and it is what the word means to most people asking for one.
   //
   // With a device already, the way to add another is PAIRING, which needs no
-  // invite and no operator. Spending a second invite does not add to what you
-  // have: it starts a separate group with its own key, and nothing syncs
-  // between the two. The relay cannot merge them afterwards, because it holds
-  // no key to either.
+  // invite and no operator. The store refuses a second group to somebody who
+  // has one, so a button here would only ever fail.
   const first = groups === 0
   $('mine-lead').textContent = first ? 'Set up your first device' : 'Add another device'
   $('invite-blurb').textContent = first
     ? 'An invite sets up your first device on this relay and creates the sync group it syncs into. Make one here — it needs nobody else — and paste it into OpsMaxx together with this relay’s address.'
     : 'A second device joins by pairing with one you already have — no invite, and nothing to ask anybody for. This relay cannot do the joining part for you, because that is signed with a key it does not have. It can give you the one thing the new machine has no way of knowing.'
 
-  // Pairing is the answer once there is something to pair with, so the button
-  // would be offering the wrong one of the two.
+  $('mint-mine-row').hidden = !first
+  $('operator-made').hidden = !first
+  $('pair-steps').hidden = first
+  // An invite still on screen once a device has registered is spent: it
+  // would only invite somebody to paste it a second time and be refused.
   if (!first) {
-    $('mint-mine-row').remove()
-    showHandoff()
-    return
+    for (const id of ['invite-mine', 'invite-mine-plain', 'invite-mine-plain-label', 'invite-mine-warn']) {
+      $(id).hidden = true
+    }
+    $('mint-mine-note').textContent = ''
   }
-
-  // Nothing to pair WITH yet, so the steps would be describing a machine that
-  // does not exist. Removed rather than hidden, for the reason the rest of
-  // this page removes things: hiding is a promise the stylesheet has broken
-  // here before.
-  $('pair-steps').remove()
-
-  wireMint({
-    button: $('mint-mine'),
-    note: $('mint-mine-note'),
-    out: $('invite-mine'),
-    warn: $('invite-mine-warn'),
-    path: '/admin/v1/my/invite',
-    plain: $('invite-mine-plain'),
-    plainLabel: $('invite-mine-plain-label')
-  })
 }
 
 /**
  * The handoff to a second machine, which is as far as this relay can take it.
  *
  * IT CANNOT ADD A DEVICE AND IT DOES NOT PRETEND TO. Adding one means signing
- * a roster entry with the account key; the key is on the devices and this
+ * a roster entry with the sync group's key; the key is on the devices and this
  * server has never held a copy. What it can do is remove the step that
  * actually stops people, which is not the pairing and not the emoji: it is
  * that the joining machine is asked to name a relay, and nothing on that
@@ -157,19 +155,28 @@ function wireMyInvite(groups) {
  * path and no credentials, which is what the client's link parser insists on.
  *
  * THE LINK CARRIES THE ADDRESS AND NOTHING ELSE. An invite in it would be
- * worse than none: spending a second invite starts a SEPARATE sync group with
- * its own key, which is the outcome this card exists to prevent. A `pair` link
- * is not ours to build either — its code and pairing id can only be minted by
- * a machine holding the account key, which is every machine except this one.
- * So the link fills a field and chooses nothing, and the format lives beside
- * the invite's in `console-kit.js` so the two cannot drift from the parser.
+ * worse than none: the store refuses a second sync group to somebody who has
+ * one, and an operator's invite would start a separate group with its own
+ * key. A `pair` link is not ours to build either — its pairing code can only
+ * be minted by a machine holding the group's key, which is every machine
+ * except this one. So the link fills a field and chooses nothing, and the
+ * format lives beside the invite's in `console-kit.js` so the two cannot drift
+ * from the parser.
  *
- * The href is set here rather than written into the markup, because the markup
- * does not know what this relay is called — the same reason the address below
- * it is not hardcoded either.
+ * Wired once, at load, whichever half of the card is showing: paintLead may
+ * reveal it later without coming back here.
  */
-function showHandoff() {
-  $('pair-steps').hidden = false
+function wireLead() {
+  wireMint({
+    button: $('mint-mine'),
+    note: $('mint-mine-note'),
+    out: $('invite-mine'),
+    warn: $('invite-mine-warn'),
+    path: '/admin/v1/my/invite',
+    plain: $('invite-mine-plain'),
+    plainLabel: $('invite-mine-plain-label')
+  })
+
   $('relay-address').textContent = window.location.origin
   $('open-here').href = relayLink()
   const note = $('copy-relay-note')
@@ -190,7 +197,7 @@ async function main() {
   else $('operator-door').remove()
 
   // The lead card cannot be written until the count is known, so the load
-  // happens first and the card is wired from its answer. A card that rendered
+  // happens first and the card is painted from its answer. A card that rendered
   // "set up your first device" and then corrected itself would be worse than
   // one that waits.
   const groups = await loadMine().catch((err) => {
@@ -198,7 +205,32 @@ async function main() {
     return null
   })
   if (groups === null) return
-  wireMyInvite(groups)
+  wireLead()
+  paintLead(groups)
+
+  // COMING BACK TO THE TAB IS WHEN THE ANSWER CHANGES. The invite is pasted
+  // into OpsMaxx, in another window; the device registers there; and the
+  // person returns here to a card still saying "set up your first device"
+  // over an empty table. `focus` covers switching back from another
+  // application, `visibilitychange` switching back from another tab, and one
+  // switch can fire both — so a load already in flight is reused rather than
+  // doubled.
+  let inFlight = null
+  const refresh = () => {
+    // Signed out underneath us: the session handler has already removed the
+    // page this would be painting into.
+    if (inFlight || !$('mine')) return
+    inFlight = loadMine()
+      .then(paintLead)
+      .catch(fail)
+      .finally(() => {
+        inFlight = null
+      })
+  }
+  window.addEventListener('focus', refresh)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refresh()
+  })
 }
 
 void main()
