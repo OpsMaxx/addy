@@ -66,7 +66,11 @@
   --warn-soft: rgba(210, 153, 34, 0.15);
   --danger: #f85149;
   --danger-soft: rgba(248, 81, 73, 0.15);
-  --danger-ink: #ffffff;
+  /* WHAT SITS ON A --danger FILL: the hover state of Delete and Block. White
+     on this red is 3.35:1, under the 4.5:1 that text this size needs, so the
+     dark theme puts its own background colour on it instead (5.68:1). The
+     light theme's darker red carries white at 5.36:1 and keeps it. */
+  --danger-ink: #0d1017;
   /* THE DANGER RED IS NOT READABLE ON ITS OWN SOFT FILL, so the chip gets a
      lighter ink than the border and background use. Measured on the real
      ground — --danger-soft's alpha composited over --bg-card, not the bare
@@ -142,7 +146,10 @@
 
   --text: #16202b;
   --text-muted: #5a6672;
-  --text-faint: #6b7784;
+  /* 4.80:1 on --bg-app and 4.55:1 on --bg-hover. The value it replaces,
+     #6b7784, was 4.29:1 on the page background — and this is the colour of
+     table headers and stat labels, which sit on exactly that. */
+  --text-faint: #646f7c;
   --text-inverse: #ffffff;
 
   /* Here the two accent roles diverge: #22c7d6 as text on white is 1.9:1 and
@@ -162,6 +169,7 @@
   --warn-soft: rgba(154, 103, 0, 0.12);
   --danger: #cf222e;
   --danger-soft: rgba(207, 34, 46, 0.12);
+  --danger-ink: #ffffff;
   --danger-chip-ink: #b3111c;
   --ok: #1a7f37;
   --ok-soft: rgba(26, 127, 55, 0.12);
@@ -189,7 +197,7 @@
 
     --text: #16202b;
     --text-muted: #5a6672;
-    --text-faint: #6b7784;
+    --text-faint: #646f7c;
     --text-inverse: #ffffff;
 
     --accent: #157c86;
@@ -206,6 +214,7 @@
     --warn-soft: rgba(154, 103, 0, 0.12);
     --danger: #cf222e;
     --danger-soft: rgba(207, 34, 46, 0.12);
+    --danger-ink: #ffffff;
     --danger-chip-ink: #b3111c;
     --ok: #1a7f37;
     --ok-soft: rgba(26, 127, 55, 0.12);

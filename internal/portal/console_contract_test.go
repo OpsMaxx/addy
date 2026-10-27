@@ -1,7 +1,9 @@
 package portal
 
 import (
+	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"regexp"
 	"sort"
@@ -392,5 +394,72 @@ func TestThePasswordIsAskedForBeforeTheMessageIsUsedUp(t *testing.T) {
 	}
 	if strings.Contains(readWeb(t, "paste.js"), "$('password-row').hidden") {
 		t.Error("paste.js toggles #password-row; it has to be there before the burn, not after")
+	}
+}
+
+// contrast is the WCAG 2 ratio between two #rrggbb colours.
+func contrast(t *testing.T, a, b string) float64 {
+	t.Helper()
+	lum := func(hex string) float64 {
+		var rgb [3]float64
+		for i := range rgb {
+			var v int
+			if _, err := fmt.Sscanf(hex[1+2*i:3+2*i], "%02x", &v); err != nil {
+				t.Fatalf("%q is not #rrggbb: %v", hex, err)
+			}
+			c := float64(v) / 255
+			if c <= 0.04045 {
+				rgb[i] = c / 12.92
+			} else {
+				rgb[i] = math.Pow((c+0.055)/1.055, 2.4)
+			}
+		}
+		return 0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]
+	}
+	x, y := lum(a), lum(b)
+	if x < y {
+		x, y = y, x
+	}
+	return (x + 0.05) / (y + 0.05)
+}
+
+func TestEveryThemeClearsAAWhereItWasMeasuredFailing(t *testing.T) {
+	// White on the dark theme's danger red was the Delete and Block hover at
+	// 3.35:1, and the light theme's faint text — table headers, stat labels —
+	// was 4.29:1 on the page. Both are text, so both need 4.5:1, in every one
+	// of the three places a theme is declared.
+	token := regexp.MustCompile(`(--[a-z-]+):\s*(#[0-9a-fA-F]{6})\b`)
+	themes := map[string]map[string]string{}
+	for _, r := range parseCSS(readWeb(t, "portal.css")) {
+		if !strings.HasPrefix(r.selector, ":root") && !strings.HasPrefix(r.selector, "@media (prefers-color-scheme") {
+			continue
+		}
+		vars := map[string]string{}
+		for _, m := range token.FindAllStringSubmatch(r.body, -1) {
+			vars[m[1]] = m[2]
+		}
+		themes[r.selector] = vars
+	}
+	if len(themes) != 3 {
+		t.Fatalf("the parser is wrong, not the code: found %d theme blocks, want 3", len(themes))
+	}
+	pairs := [][2]string{
+		{"--danger-ink", "--danger"},
+		{"--text-faint", "--bg-app"},
+		{"--text-faint", "--bg-card"},
+		{"--text-faint", "--bg-hover"},
+		{"--danger", "--bg-elevated"},
+	}
+	for sel, vars := range themes {
+		for _, p := range pairs {
+			fg, bg := vars[p[0]], vars[p[1]]
+			if fg == "" || bg == "" {
+				t.Errorf("%s does not declare %s and %s, so it inherits a pair measured for another theme", sel, p[0], p[1])
+				continue
+			}
+			if r := contrast(t, fg, bg); r < 4.5 {
+				t.Errorf("%s: %s %s on %s %s is %.2f:1, under 4.5:1", sel, p[0], fg, p[1], bg, r)
+			}
+		}
 	}
 }
