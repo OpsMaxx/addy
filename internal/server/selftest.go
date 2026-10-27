@@ -212,7 +212,11 @@ func runCycle(ctx context.Context, target, invite string, opts SelftestOptions) 
 	}
 	switch turnMode {
 	case "embedded":
-		fmt.Println("  the instance runs a relay and issued a credential for it")
+		// Issued, not proved. Whether 3478 and the relay range reach this
+		// box from outside is a firewall question nothing in here can see,
+		// and saying "runs a relay" alone read as if it had been checked.
+		fmt.Println("  the instance runs a relay and issued a credential for it;")
+		fmt.Println("  NOT checked: that 3478/udp and 61000-65535/udp reach it from outside")
 	case "external":
 		fmt.Printf("  the instance points devices at an external relay: %s\n", turnURL)
 	default:

@@ -53,10 +53,17 @@ service:
 # a node with that public address and the range open to it, which a
 # LoadBalancer does not arrange. This used to offer range values that nothing
 # passed to addy.
+#
+# So turn.enabled REQUIRES turn.hostNetwork, and the chart refuses one without
+# the other. hostNetwork puts the pod on its node's own network: the relay
+# range and 3478 are then the node's ports, and publicIP must be that node's
+# public address -- pin the pod to it with nodeSelector. 80 and 443 become the
+# node's too, so nothing else on that node may hold them.
 turn:
   enabled: false
   publicIP: ""
   port: 3478
+  hostNetwork: false
 
 # The operator console at /admin. All three or none: addy refuses to start
 # with some of them. The client secret comes from a Secret you create, never
