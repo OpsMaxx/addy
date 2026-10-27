@@ -1,6 +1,7 @@
 package repocheck
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -148,5 +149,78 @@ func TestTheReleaseIsDraftedBeforeItIsVerified(t *testing.T) {
 	}
 	if verify < draft {
 		t.Error("the notes are verified before the release is created; nothing would be checked")
+	}
+}
+
+// The image is pushed under the tag the chart and the installer pull, only
+// after the tests pass, and never as `:latest` for a prerelease.
+//
+// It used to be pushed as `:v0.1.0` while the chart pulled `:0.1.0`, in a job
+// that did not wait for the tests -- and the VirusTotal step read its key from
+// its own `env`, which a step's `if:` cannot see, so it never ran.
+func TestTheImageIsTaggedTheWayEverythingPullsIt(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wf struct {
+		Jobs map[string]struct {
+			Needs any               `yaml:"needs"`
+			Env   map[string]string `yaml:"env"`
+			Steps []struct {
+				Name string            `yaml:"name"`
+				Run  string            `yaml:"run"`
+				If   string            `yaml:"if"`
+				Env  map[string]string `yaml:"env"`
+				With map[string]any    `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(b, &wf); err != nil {
+		t.Fatal(err)
+	}
+
+	image := wf.Jobs["image"]
+	if !strings.Contains(fmt.Sprint(image.Needs), "build") {
+		t.Error("the image job does not wait for the build job, which is where the tests run")
+	}
+	var naming, push string
+	for _, s := range image.Steps {
+		if s.Name == "Name the image" {
+			naming = s.Run
+		}
+		if tags, ok := s.With["tags"]; ok {
+			push = fmt.Sprint(tags)
+		}
+	}
+	if !strings.Contains(naming, `${GITHUB_REF_NAME#v}`) {
+		t.Error("the image tag keeps the git tag's `v`; the chart and installer pull it without one")
+	}
+	if !strings.Contains(naming, "*-*") {
+		t.Error("`:latest` is not withheld from prereleases")
+	}
+	if strings.Contains(push, "ref_name") || strings.Contains(push, ":latest") {
+		t.Errorf("the push names its tags directly (%s) instead of using the computed ones", push)
+	}
+
+	release := wf.Jobs["release"]
+	for _, s := range release.Steps {
+		if strings.Contains(s.If, "env.VT_API_KEY") {
+			if _, ok := s.Env["VT_API_KEY"]; ok {
+				t.Error("VT_API_KEY is set on the VirusTotal step itself, where its own `if:` cannot see it")
+			}
+			if _, ok := release.Env["VT_API_KEY"]; !ok {
+				t.Error("the VirusTotal step tests env.VT_API_KEY but the release job does not set it")
+			}
+		}
+	}
+
+	// And the chart pulls what is pushed: appVersion has no `v`.
+	chart, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "helm", "addy", "Chart.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(chart), `appVersion: "v`) {
+		t.Error("Chart.yaml's appVersion starts with v; images are pushed without one")
 	}
 }
