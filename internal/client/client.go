@@ -442,6 +442,24 @@ type Notification struct {
 
 // PutObject writes a sealed object.
 func (c *Client) PutObject(name string, epoch, counter uint64, body []byte, ifMatch string) (string, error) {
+	return c.putObject(name, epoch, counter, body, ifMatch, nil)
+}
+
+// PutEscrow writes an escrow, signed by the root key as the relay requires.
+func (c *Client) PutEscrow(epoch, counter uint64, body []byte, root ed25519.PrivateKey) (string, error) {
+	sum := sha256.Sum256(body)
+	sig, err := protocol.Sign(root, protocol.EscrowWrite{
+		AccountID: c.Account, Epoch: epoch, Counter: counter, BodyHash: sum[:],
+	})
+	if err != nil {
+		return "", err
+	}
+	return c.putObject("escrow", epoch, counter, body, "", map[string]string{
+		"X-Addy-Root-Sig": base64.StdEncoding.EncodeToString(sig),
+	})
+}
+
+func (c *Client) putObject(name string, epoch, counter uint64, body []byte, ifMatch string, extra map[string]string) (string, error) {
 	nonce, err := protocol.Nonce()
 	if err != nil {
 		return "", err
@@ -469,6 +487,9 @@ func (c *Client) PutObject(name string, epoch, counter uint64, body []byte, ifMa
 	req.Header.Set("Content-Type", "application/json")
 	if ifMatch != "" {
 		req.Header.Set("If-Match", ifMatch)
+	}
+	for k, v := range extra {
+		req.Header.Set(k, v)
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

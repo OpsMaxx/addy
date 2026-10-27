@@ -168,3 +168,45 @@ func TestALongPollParkedBeforeARevokeIsNotAnswered(t *testing.T) {
 		t.Errorf("the revoked device's parked poll answered %d, want 401", code)
 	}
 }
+
+// A MEMBER CANNOT WRITE THE ESCROW. Recovery reads one past the roster's end
+// as proof of a rollback, so a paired device that could PUT junk at epoch n+1
+// made recovery refuse for good; one that could overwrite epoch 1's decided
+// what the phrase recovers. Only the root key's signature admits a write.
+func TestOnlyTheRootKeyWritesTheEscrow(t *testing.T) {
+	srv, db := instance(t)
+	a := client.New(srv.URL, true)
+	acct, err := a.Register("quiet-otter-41", invite(t, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Login(); err != nil {
+		t.Fatal(err)
+	}
+	for _, epoch := range []uint64{1, 2} {
+		if _, err := a.PutObject("escrow", epoch, 1, []byte("junk"), ""); err == nil || !strings.Contains(err.Error(), "403") {
+			t.Errorf("a member wrote the epoch-%d escrow unsigned: %v", epoch, err)
+		}
+		// Signed, but by the device rather than the root key.
+		if _, err := a.PutEscrow(epoch, 1, []byte("junk"), a.Device.Sign); err == nil || !strings.Contains(err.Error(), "403") {
+			t.Errorf("a device key's signature wrote the epoch-%d escrow: %v", epoch, err)
+		}
+	}
+	if _, err := a.GetObject("escrow", 2); err == nil {
+		t.Fatal("something was stored at epoch 2")
+	}
+	got, err := a.GetObject("escrow", 1)
+	if err != nil || !bytes.Equal(got.Body, acct.Escrow) {
+		t.Fatalf("the epoch-1 escrow changed: %v", err)
+	}
+
+	// The root key's signature over exactly this write goes through.
+	if _, err := a.PutEscrow(2, 1, []byte("sealed at epoch 2"), acct.Root.Sign); err != nil {
+		t.Fatalf("a root-signed escrow write was refused: %v", err)
+	}
+	if got, err := a.GetObject("escrow", 2); err != nil || string(got.Body) != "sealed at epoch 2" {
+		t.Fatalf("the root-signed escrow is not what was stored: %v", err)
+	}
+	// What the signature binds -- account, epoch, counter, the bytes -- is
+	// pinned field by field in protocol.TestEscrowWriteBindsEveryField.
+}

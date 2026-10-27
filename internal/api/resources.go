@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -185,6 +186,12 @@ func (s *Server) putObject(w http.ResponseWriter, r *http.Request, a authedReque
 		s.fail(w, http.StatusBadRequest, errors.New("the body is not base64"))
 		return
 	}
+	if r.PathValue("name") == "escrow" {
+		if status, err := s.checkEscrowWrite(r, a, req.Epoch, req.Counter, body); err != nil {
+			s.fail(w, status, err)
+			return
+		}
+	}
 
 	etag, err := s.DB.PutObject(r.Context(), a.Account, store.Object{
 		Name: r.PathValue("name"), Epoch: req.Epoch, Counter: req.Counter, Body: body,
@@ -212,6 +219,41 @@ func (s *Server) putObject(w http.ResponseWriter, r *http.Request, a authedReque
 // deleteObject removes an object and so frees the quota it held.
 //
 // `?epoch=N` deletes that epoch's copy, the same addressing GET uses. Without
+// EscrowSigHeader carries the root key's signature over an escrow write.
+const EscrowSigHeader = "X-Addy-Root-Sig"
+
+// checkEscrowWrite admits an escrow PUT only when the recovery phrase's key
+// signed it.
+//
+// ANY MEMBER COULD WRITE ONE, and it was the one object where that mattered.
+// Recovery reads the escrow one epoch past the roster's end as proof the relay
+// rolled the account back, so a paired device -- or a stolen one before its
+// revocation -- that PUT junk there made recovery refuse for good; and an
+// overwrite of an existing epoch's escrow decided what the phrase recovers. The
+// people who seal escrows hold RK (account creation, which is not this path,
+// and a revocation rotation), so RK signs, and the relay checks the signature
+// against the root_sign_pub it was given at registration.
+func (s *Server) checkEscrowWrite(r *http.Request, a authedRequest, epoch, counter uint64, body []byte) (int, error) {
+	refused := errors.New("an escrow is written only with the recovery phrase's key; this request was not signed by it")
+	sig, err := base64.StdEncoding.DecodeString(r.Header.Get(EscrowSigHeader))
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		return http.StatusForbidden, refused
+	}
+	root, err := s.DB.RootSignPub(r.Context(), a.Account)
+	if err != nil {
+		return statusFor(err), err
+	}
+	var acct protocol.AccountID
+	copy(acct[:], mustDecode(a.Account))
+	sum := sha256.Sum256(body)
+	if protocol.Verify(root, protocol.EscrowWrite{
+		AccountID: acct, Epoch: epoch, Counter: counter, BodyHash: sum[:],
+	}, sig) != nil {
+		return http.StatusForbidden, refused
+	}
+	return 0, nil
+}
+
 // it every epoch of the name goes: the caller asked for the object gone, and an
 // old epoch's copy left behind would still be charged against the quota this
 // call exists to free.

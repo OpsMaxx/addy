@@ -278,9 +278,10 @@ two purposes. The fix is structural, not procedural:
    signing device's CSPRNG, fresh per signature. The server never chooses all of
    the bytes that get signed.
 
-The four prefixes are `addy-login-v1\0`, `addy-authz-v1\0`,
+The four device prefixes are `addy-login-v1\0`, `addy-authz-v1\0`,
 `addy-roster-v1\0` and `addy-signal-v1\0`. `DESIGN.md` names
-`addy-roster-v1\0` explicitly; the other three follow its pattern.
+`addy-roster-v1\0` explicitly; the other three follow its pattern. The root
+key has one more, `addy-escrow-write-v1\0` (4.5).
 
 ### 4.1 Login — signed by `DK_sign`
 
@@ -386,6 +387,33 @@ view of the roster, which is what a forked chain looks like from the inside.
 
 An append-only hash-chained log. Every client verifies it from genesis before it
 encrypts anything to any device in it.
+
+
+### 4.5 Escrow write — signed by `RK_sign`
+
+```
+domain      : literal     "addy-escrow-write-v1\0"
+account_id  : fixed[16]
+epoch       : u64
+counter     : u64
+body_hash   : fixed[32]   SHA-256 of the sealed escrow exactly as stored
+```
+
+Sent base64 in `X-Addy-Root-Sig` on `PUT /v1/obj/escrow`. The relay MUST refuse
+an escrow PUT (403) whose signature does not verify against the account's
+`root_sign_pub`. Every other object is the account's to overwrite; the escrow
+is not, because recovery reads one past the roster's end as proof the relay
+rolled the account back. A member that could write one could make recovery
+refuse for good, and one that could overwrite an existing epoch's could decide
+what the phrase recovers. Only RK holders seal escrows: account creation, which
+carries epoch 1's in the registration body, and a revocation rotation.
+
+No device nonce, unlike 4.1–4.4. The root key signs only bytes its holder
+composed, so there is no server-chosen input to bind; a replay re-PUTs the same
+escrow at the same epoch and counter, which is the write it authorised.
+
+A recovering device MUST NOT treat an escrow past the roster's end as a
+rollback unless it opens under `RK_enc` for that account and epoch.
 
 ### 5.1 Entry body — `addy-roster-v1\0`
 
@@ -1127,6 +1155,7 @@ reports `{"version", "build", "protocol"}`.
 |---|---|
 | `GET /v1/signal` | Waits for a frame in this device's own mailbox: 200 `{"frame"}`, or 204 when the poll window passes. A `GET` with a body is refused with 400. |
 | `POST /v1/signal?to={peer DK_sign hex}` | Body `{"frame": base64}`, into that peer's mailbox in the same account: 204. |
+| `PUT /v1/obj/escrow` | As any object, plus `X-Addy-Root-Sig` (4.5). **403** without a valid root signature. |
 | `DELETE /v1/obj/{name}[?epoch=N]` | 204, or 404 when there is nothing to delete. Without `epoch`, every epoch of the name goes. Frees the quota the object held. |
 | `POST`/`GET /v1/pair/{pairing_id}?as=…` | Unauthenticated, §8.3. **404** means this relay has no pairing with that id: it finished, expired, or the relay restarted, since the rendezvous is held in memory. The device should say "start again" rather than keep polling. Only the initiator's first `POST` creates a pairing. A `GET` for an unknown id waits out one poll window before answering 404, so a joiner that arrives a moment early is not refused. |
 | any authenticated call | **413** when the body is over 8 MiB. The relay reads one byte past the limit and refuses; it never truncates. Before this, a truncated body failed its request signature and came back as a misleading 401. |
