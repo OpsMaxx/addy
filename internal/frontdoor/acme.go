@@ -91,6 +91,15 @@ func NewACME(c ACMEConfig) (*tls.Config, func(http.Handler) http.Handler, *certm
 		DecisionFunc: c.Routes.Decide,
 	}
 
+	// THE KEY SURVIVES RENEWAL. Devices pin the SubjectPublicKeyInfo of this
+	// certificate on first contact and every login signature covers it, so a
+	// certmagic that minted a fresh key at each renewal -- its default -- would
+	// present every paired device with what looks exactly like a
+	// man-in-the-middle, roughly every sixty days. Reusing the key is what
+	// makes the pin a long-lived one. `addy panic` deletes the certificate
+	// store, key included, which is the one time a new key is the point.
+	certmagic.Default.ReusePrivateKeys = true
+
 	certmagic.DefaultACME.Agreed = true
 	certmagic.DefaultACME.Email = c.Email
 

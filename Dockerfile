@@ -9,7 +9,8 @@
 #
 # The cost is real and worth stating: no `docker exec sh`, and a healthcheck
 # must be the binary itself rather than a shell one-liner. That is why the
-# compose healthcheck is `["CMD", "/addy", "selftest", "--quick"]` in exec form.
+# compose healthcheck is `/addy selftest -quick -connect 127.0.0.1:443` in exec
+# form.
 
 FROM golang:1.26 AS build
 WORKDIR /src
@@ -35,7 +36,12 @@ COPY --from=build /addy /addy
 # addy binds 80 and 443, which on Linux needs either root or
 # CAP_NET_BIND_SERVICE. The compose file runs it host-networked as root; a
 # hardened deployment should drop to a uid and grant the capability instead.
-EXPOSE 80 443 3478/udp 5349
+#
+# TURN is 3478/udp plus the relay range 61000-65535/udp (internal/relay), and
+# nothing else: TURN over TLS is not implemented, and the EXPOSE for its port
+# told every reader there was something listening there. The range is not EXPOSEd either
+# -- the compose file is host-networked, so EXPOSE does nothing for it.
+EXPOSE 80 443 3478/udp
 VOLUME ["/var/lib/addy"]
 ENTRYPOINT ["/addy"]
 CMD ["serve"]

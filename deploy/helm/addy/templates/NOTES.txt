@@ -2,7 +2,7 @@ addy is deploying as {{ include "addy.fullname" . }}.
 
   Domain    {{ .Values.domain }}
   Portal    {{ if .Values.portal.enabled }}on{{ else }}off (headless -- the default){{ end }}
-  Relay     {{ if .Values.turn.enabled }}embedded, advertising {{ .Values.turn.publicIP }}{{ else }}NONE. Devices on networks that need one will not connect{{ end }}
+  Relay     {{ if .Values.turn.enabled }}embedded, advertising {{ .Values.turn.publicIP }}; 61000-65535/udp must reach this pod there{{ else }}NONE. Devices on networks that need one will not connect{{ end }}
 
 BEFORE IT CAN SERVE, two things have to be true and neither is Kubernetes'
 to arrange:
@@ -18,4 +18,10 @@ Check both before you debug anything else:
 
 Then prove it actually works, rather than that it started:
 
-    kubectl exec -it {{ include "addy.fullname" . }}-0 -- /addy selftest -target {{ .Values.domain }} -data /var/lib/addy
+    kubectl exec -it {{ include "addy.fullname" . }}-0 -- /addy selftest -connect 127.0.0.1:443 -data /var/lib/addy
+
+Then mint the invite your first device needs, and in OpsMaxx open Sync &
+devices, choose "This is my first device", and give it https://{{ .Values.domain }}
+and the invite:
+
+    kubectl exec -it {{ include "addy.fullname" . }}-0 -- /addy invite

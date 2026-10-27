@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"time"
 )
 
 // Migrations are applied in order and identified by their INDEX, tracked in
@@ -283,6 +285,12 @@ func (d *DB) migrate(ctx context.Context) error {
 			d.path, have, len(migrations))
 	}
 
+	if have > 0 && have < len(migrations) {
+		if err := d.snapshot(ctx, have); err != nil {
+			return err
+		}
+	}
+
 	for i := have; i < len(migrations); i++ {
 		stmt := migrations[i]
 		version := i + 1
@@ -304,6 +312,35 @@ func (d *DB) migrate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// snapshot copies the database aside before an upgrade changes its schema.
+//
+// Migrations only go forward, and an older binary refuses a newer schema (see
+// above) -- so without a copy, rolling back an upgrade that went wrong means
+// losing every account on the box. VACUUM INTO writes a consistent, compacted
+// copy through SQLite itself, which a file copy of a WAL database next to a
+// live -wal sidecar is not.
+//
+// Only when there is something to lose and something about to change: a
+// fresh database has nothing in it, and an unchanged schema needs no undo.
+// Named by the schema it holds and the time it was taken, so the copy says
+// which binary can open it and a second upgrade never overwrites the first.
+// Nothing deletes them; ADMIN.md says how to roll back with one, and how to
+// clear them out.
+func (d *DB) snapshot(ctx context.Context, version int) error {
+	dest := fmt.Sprintf("%s.schema-%d.%s.bak", d.path, version, time.Now().UTC().Format("20060102T150405Z"))
+	if _, err := d.write.ExecContext(ctx, "VACUUM INTO ?", dest); err != nil {
+		return fmt.Errorf("copying the database to %s before upgrading its schema from version %d: %w\n"+
+			"Nothing was changed. Free some space on the data volume, or move the database aside yourself, and start again",
+			dest, version, err)
+	}
+	// The same 0600 as the database it copies, for the same reasons -- see
+	// restrict.
+	if err := os.Chmod(dest, 0o600); err != nil {
+		return fmt.Errorf("securing %s: %w", dest, err)
 	}
 	return nil
 }

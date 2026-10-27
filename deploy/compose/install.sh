@@ -61,18 +61,26 @@ set -euo pipefail
 ADDY_MIN_MEM_KB=1900000        # ~2 GiB, allowing for what the kernel reserves
 ADDY_MIN_CPUS=2
 ADDY_MIN_DISK_KB=20971520      # 20 GiB on the Docker data root
-ADDY_RELAY_MIN=49160
-ADDY_RELAY_MAX=49360
 INSTALL_DIR="${ADDY_INSTALL_DIR:-/opt/addy}"
 COMPOSE=()                     # filled in by check_docker
+PUBLIC_V4=""                   # filled in by check_dns
 
-# NOTE on the relay range. DESIGN.md names 49152-65535, the ephemeral range
-# coturn defaults to. Narrowed here, and narrowed in exactly one place:
-#   - WireGuard's 51820 sits inside it, and the collision is intermittent and
-#     start-order-dependent, which is the worst kind to debug.
-#   - It is 16384 ports. Every firewall rule and every provider firewall form
-#     scales with that number, while 200 concurrent relayed sessions is far
-#     past what a single-box relay will ever see.
+# Without the `v`. Git tags are v0.1.0; images, like `addy version`, are 0.1.0,
+# and a v typed out of habit should not be a failed pull.
+ADDY_VERSION_ASKED="${ADDY_VERSION:-}"
+ADDY_VERSION="${ADDY_VERSION:-latest}"
+ADDY_VERSION="${ADDY_VERSION#v}"
+
+# THE RELAY RANGE IS THE BINARY'S, and it is not a setting. internal/relay
+# allocates from 61000-65535 -- clear of WireGuard's 51820 and of the
+# 32768-60999 the kernel hands to outbound sockets -- and nothing passes it a
+# different one. This used to name a narrower range and offer a flag to change
+# it, which wrote two variables nothing read: every firewall this installer advised was
+# open on ports the relay never used. Change it here only together with
+# DefaultMinPort and DefaultMaxPort in internal/relay/relay.go.
+ADDY_TURN_PORT=3478
+ADDY_RELAY_MIN=61000
+ADDY_RELAY_MAX=65535
 
 log()  { printf '==> %s\n' "$*"; }
 warn() { printf '==> %s\n' "$*" >&2; }
@@ -178,10 +186,14 @@ check_local_firewall() {
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
     ufw status | grep -qE '(^80|^443|Anywhere.*(80|443))' \
       || warn "ufw is active with no rule for 80/443. The real check is below."
+    ufw status | grep -q "^${ADDY_TURN_PORT}/udp" \
+      || warn "ufw is active with no rule for ${ADDY_TURN_PORT}/udp (TURN)."
     ufw status | grep -q "${ADDY_RELAY_MIN}:${ADDY_RELAY_MAX}/udp" \
       || warn "ufw is active with no rule for ${ADDY_RELAY_MIN}:${ADDY_RELAY_MAX}/udp (the TURN relay range)."
   fi
   if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --list-ports 2>/dev/null | grep -q "${ADDY_TURN_PORT}/udp" \
+      || warn "firewalld is active with no rule for ${ADDY_TURN_PORT}/udp (TURN)."
     firewall-cmd --list-ports 2>/dev/null | grep -q "${ADDY_RELAY_MIN}-${ADDY_RELAY_MAX}/udp" \
       || warn "firewalld is active with no rule for ${ADDY_RELAY_MIN}-${ADDY_RELAY_MAX}/udp (the TURN relay range)."
   fi
@@ -213,6 +225,9 @@ check_dns() {
   [ -n "$v4$v6" ] || refuse \
     "Could not determine this box's public IP address." \
     "Check that outbound HTTPS works, then re-run."
+  # The TURN relay advertises this. IPv4 only, because the relay listens on
+  # IPv4 only; an IPv6-only box gets no relay rather than a wrong one.
+  PUBLIC_V4="$v4"
 
   a="$(retry_network "resolving A $domain" doh_resolve "$domain" A || true)"
   aaaa="$(retry_network "resolving AAAA $domain" doh_resolve "$domain" AAAA || true)"
@@ -239,6 +254,29 @@ check_dns() {
   log "DNS for $domain is live and points here"
 }
 
+# --- the image exists and this box may have it -----------------------------
+#
+# Its own step, with its own error, BEFORE anything uses it. The ACME check
+# below runs the image, and when the pull inside it failed, the refusal said
+# port 80 was unreachable and sent the operator to their provider's firewall
+# for a problem that was in the registry. docker's own output is left on the
+# screen: "manifest unknown", "denied" and a timeout are three different
+# answers, and it is the only thing that says which.
+pull_image() {
+  ADDY_IMAGE="ghcr.io/opsmaxx/addy:${ADDY_VERSION}"
+  log "pulling $ADDY_IMAGE"
+  retry_network "pulling $ADDY_IMAGE" docker pull "$ADDY_IMAGE" || refuse \
+"Could not pull $ADDY_IMAGE. Nothing has been installed.
+
+docker's error above says which of these it is:
+  * \"manifest unknown\" or \"not found\": no release is published under
+    that version. Check the releases page, or set ADDY_VERSION to one that is.
+  * \"denied\" or \"unauthorized\": the package is not public. Log in with a
+    token that can read it: docker login ghcr.io
+  * a timeout or a DNS error: this box cannot reach ghcr.io." \
+    "Fix the cause above, then re-run. Nothing needs undoing."
+}
+
 # --- preflight: port 80 is reachable FROM OUTSIDE --------------------------
 #
 # Stated honestly, because the alternative is a check that passes on a box
@@ -252,8 +290,7 @@ check_acme_reachable() {
   local domain="$1"
   log "proving port 80 is reachable from the internet (a real staging order)"
   # Host-networked, so it really binds this box's port 80.
-  if ! docker run --rm --network host \
-        "ghcr.io/opsmaxx/addy:${ADDY_VERSION:-latest}" \
+  if ! docker run --rm --network host "$ADDY_IMAGE" \
         preflight -domain "$domain"; then
     refuse \
 "An ACME challenge for $domain did not complete. Port 80 has to be reachable
@@ -302,7 +339,7 @@ gen_env() {
     cat > "$env_file" <<EOF
 ADDY_DOMAIN=$domain
 ADDY_ACME_EMAIL=$email
-ADDY_VERSION=${ADDY_VERSION:-latest}
+ADDY_VERSION=$ADDY_VERSION
 
 GARAGE_RPC_SECRET=$(openssl rand -hex 32)
 GARAGE_DEFAULT_ACCESS_KEY=addy-$(openssl rand -hex 8)
@@ -310,8 +347,12 @@ GARAGE_DEFAULT_SECRET_KEY=$(openssl rand -hex 32)
 GARAGE_DEFAULT_BUCKET=addy
 
 ADDY_TURN_SECRET=$(openssl rand -hex 32)
-ADDY_TURN_RELAY_MIN=$ADDY_RELAY_MIN
-ADDY_TURN_RELAY_MAX=$ADDY_RELAY_MAX
+ADDY_TURN_PUBLIC_IP=$PUBLIC_V4
+
+# The operator console. All three or none; docs/OPERATOR-SIGNIN.md.
+ADDY_OIDC_ISSUER=
+ADDY_OIDC_CLIENT_ID=
+ADDY_OIDC_CLIENT_SECRET=
 EOF
   )
   chmod 600 "$env_file"
@@ -331,8 +372,10 @@ verify() {
   # A first boot includes a real certificate order, which is not instant.
   local attempt
   for attempt in $(seq 1 30); do
+    # Over loopback, naming the domain: whether the provider routes this box's
+    # own public address back to it is not what is being asked.
     if "${COMPOSE[@]}" -f "$INSTALL_DIR/docker-compose.yml" \
-         exec -T addy /addy selftest -target "$domain" -quick >/dev/null 2>&1; then
+         exec -T addy /addy selftest -target "$domain" -connect 127.0.0.1:443 -quick >/dev/null 2>&1; then
       return 0
     fi
     sleep 5
@@ -346,17 +389,21 @@ usage() {
   cat <<EOF
 addy installer
 
-  install.sh [--domain HOST] [--email ADDRESS] [--yes] [--relay-range MIN-MAX]
+  install.sh [--domain HOST] [--email ADDRESS] [--yes]
 
   --domain        The hostname this instance answers on. Required.
   --email         Contact address for the ACME account, so the CA can warn you
                   before a renewal fails.
   --yes, -y       Non-interactive. Requires --domain.
-  --relay-range   UDP range for the TURN relay (default ${ADDY_RELAY_MIN}-${ADDY_RELAY_MAX}).
 
 ADDY_DOMAIN and ADDY_ACME_EMAIL are read from the environment if the flags are
 not given, for the configuration-management case where passing flags through
-\`curl | sh -s --\` is awkward.
+\`curl | sh -s --\` is awkward. ADDY_VERSION picks the release (default latest).
+
+RUN IT AGAIN TO UPGRADE. On a box that already has $INSTALL_DIR/.env it keeps
+that file, pulls the release, replaces the compose file and restarts. addy
+copies its database aside before any schema change; docs/ADMIN.md says how to
+roll back with that copy.
 EOF
 }
 
@@ -368,7 +415,6 @@ main() {
       --domain) domain="${2:-}"; shift 2 ;;
       --email)  email="${2:-}";  shift 2 ;;
       --yes|-y) assume_yes=1; shift ;;
-      --relay-range) ADDY_RELAY_MIN="${2%%-*}"; ADDY_RELAY_MAX="${2##*-}"; shift 2 ;;
       --help|-h) usage; exit 0 ;;
       *) refuse "Unknown option: $1" "install.sh --help" ;;
     esac
@@ -376,6 +422,13 @@ main() {
 
   domain="${domain:-${ADDY_DOMAIN:-}}"
   email="${email:-${ADDY_ACME_EMAIL:-}}"
+
+  # An existing install is an upgrade, not a refusal. The fresh-install path
+  # checks that 80 and 443 are free, and on this box they are held by addy.
+  if [ -f "$INSTALL_DIR/.env" ]; then
+    upgrade "$domain"
+    return 0
+  fi
 
   if [ -z "$domain" ]; then
     # --yes alone is not enough: without a domain there is nothing to ask a CA
@@ -398,17 +451,62 @@ main() {
   check_port_free
   check_local_firewall
   check_dns "$domain"
+  pull_image
   check_acme_reachable "$domain"
 
   fetch_bundle
   gen_env "$domain" "$email"
   start
   verify "$domain"
+  finished "$domain"
+}
 
+upgrade() {
+  local asked="$1" env_file="$INSTALL_DIR/.env" domain
+  check_root    # first: .env is 0600 root, so nothing below can read it otherwise
+  domain="$(sed -n 's/^ADDY_DOMAIN=//p' "$env_file")"
+  [ -z "$asked" ] || [ "$asked" = "$domain" ] || refuse \
+    "This box already runs addy for $domain. --domain $asked would not change that." \
+    "Run without --domain to upgrade. To move to a new name, set ADDY_DOMAIN in $env_file and re-run."
+
+  check_docker
+  log "upgrading the addy at $INSTALL_DIR ($domain)"
+
+  if [ -n "$ADDY_VERSION_ASKED" ]; then
+    sed -i "s/^ADDY_VERSION=.*/ADDY_VERSION=$ADDY_VERSION/" "$env_file"
+  else
+    ADDY_VERSION="$(sed -n 's/^ADDY_VERSION=//p' "$env_file")"
+    ADDY_VERSION="${ADDY_VERSION:-latest}"
+  fi
+  pull_image
+
+  fetch_bundle
+  start
+  verify "$domain"
+  log "upgraded to $(docker exec addy /addy version)"
+  log "Rolling back: docs/ADMIN.md, \"Upgrades, backups and rollback\"."
+}
+
+finished() {
+  local domain="$1"
   log "done -- https://$domain"
-  log "The TURN relay range ${ADDY_RELAY_MIN}-${ADDY_RELAY_MAX}/udp must be open inbound in the"
-  log "provider's firewall too. It is proved by \`addy selftest\` once the relay"
-  log "milestone lands; until then nothing here has tested it."
+  echo
+  echo "Your first device: mint an invite on this box,"
+  echo
+  echo "    docker exec addy /addy invite"
+  echo
+  echo "then in OpsMaxx open Sync & devices, choose \"This is my first device\", and"
+  echo "give it https://$domain and the invite. Every device after that is added by"
+  echo "pairing with the first and needs no invite."
+  echo
+  if [ -n "$PUBLIC_V4" ]; then
+    echo "The TURN relay advertises $PUBLIC_V4. Open ${ADDY_TURN_PORT}/udp and"
+    echo "${ADDY_RELAY_MIN}-${ADDY_RELAY_MAX}/udp inbound in the provider's firewall as well as"
+    echo "this host's; nothing here can test that from inside the box."
+  else
+    echo "NO TURN RELAY: this box has no public IPv4 and the relay listens on IPv4"
+    echo "only. Devices on networks that need a relay will not connect."
+  fi
 }
 
 main "$@"

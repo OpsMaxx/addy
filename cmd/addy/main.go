@@ -46,6 +46,7 @@ Commands:
   panic       Rotate every secret this box holds and stop serving devices
   reonboard   Show or clear the reonboard-required flag panic and reset set
   reset       Delete every account on this box (--hard), after showing what goes
+  unclaim     Forget who claimed the operator console, so the next sign-in claims it
   service     List, check, preview and install the services addy can deploy beside itself
   version     Print version information
 
@@ -77,6 +78,8 @@ func main() {
 		err = reonboard(args)
 	case "reset":
 		err = reset(args)
+	case "unclaim":
+		err = unclaim(args)
 	case "service", "services":
 		err = service(args)
 	case "version", "--version", "-version":
@@ -158,8 +161,8 @@ func serve(args []string) error {
 	// environment answered earlier and less specifically.
 	//
 	// Only the variables something actually reads are listed. The compose file
-	// sets several more for the object store and TURN; those arrive with the
-	// milestones that use them, and wiring a variable to nothing now would
+	// sets several more for the object store; those arrive with the
+	// milestone that uses them, and wiring a variable to nothing now would
 	// mean an operator setting it and watching it do nothing.
 	envDefault(&cfg.DataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
 	envDefault(&cfg.Domain, "ADDY_DOMAIN", "")
@@ -208,6 +211,8 @@ func selftest(args []string) error {
 	inviteToken := fs.String("invite", "",
 		"An invite token, for a run from somewhere else. An invite IS the authorization to register, so the cycle needs one")
 	insecure := fs.Bool("insecure", false, "Accept a self-signed certificate, for -dev instances")
+	connect := fs.String("connect", "",
+		"Dial this address (e.g. 127.0.0.1:443) instead of resolving -target, which still names the host. What the probes use: the front door refuses every name but its own, localhost included")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -218,6 +223,7 @@ func selftest(args []string) error {
 		DataDir:  *dataDir,
 		Invite:   *inviteToken,
 		Insecure: *insecure,
+		Connect:  *connect,
 	})
 }
 
@@ -311,6 +317,16 @@ func reset(args []string) error {
 	return server.Reset(context.Background(), server.ResetOptions{
 		DataDir: *dataDir, Hard: *hard, Yes: *yes,
 	})
+}
+
+func unclaim(args []string) error {
+	fs := flag.NewFlagSet("unclaim", flag.ExitOnError)
+	dataDir := fs.String("data", "", "Data directory (default: "+server.DefaultDataDir+")")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	envDefault(dataDir, "ADDY_DATA_DIR", server.DefaultDataDir)
+	return server.Unclaim(context.Background(), *dataDir, nil)
 }
 
 // service is the wizards.

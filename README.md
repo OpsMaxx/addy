@@ -5,12 +5,32 @@ A self-hosted, end-to-end-encrypted satellite relay for
 sync, continuity between your own machines, and a deployment helper for a small
 set of self-hosted services.
 
-**Status: nothing is implemented yet.** This repository currently holds the
-design of record and its scaffolding. `docs/DESIGN.md` is the complete design —
-about two thousand lines of it, including the corrections an adversarial review
-forced before a line of code existed. Read
+**Status: working, and not yet released.** The relay runs: account creation
+by invite, the signed device roster, sealed-object sync with conflict keeping,
+store-and-forward mail, pairing, an embedded TURN relay, one-time pastes, its
+own TLS front door with ACME, and an optional operator console at `/admin`.
+OpsMaxx's *Sync & devices* page is its client. No version has been tagged, so
+there is no published image or binary yet: build from source with
+`scripts/build.sh`, or try it locally with `go run ./cmd/addy serve -dev`.
+
+`docs/DESIGN.md` is the design of record, including the corrections an
+adversarial review forced before a line of code existed. Where the code
+disagrees with it, the code is right -- not every disagreement is recorded
+there yet. Read
 [`THREAT_MODEL.md`](THREAT_MODEL.md) before you read anything else, because the
 whole point of addy is what it is *not* trusted with.
+
+## Running one
+
+- [`deploy/compose/install.sh`](deploy/compose/install.sh) — one box with
+  Docker. It checks DNS and port 80 before it writes anything, and re-running
+  it upgrades.
+- [`deploy/helm/addy`](deploy/helm/addy) — Kubernetes, for when you already
+  have a cluster. Read the top of `values.yaml` first.
+- [`docs/ADMIN.md`](docs/ADMIN.md) — what an operator can and cannot do, the
+  first device, upgrades, backups and rollback.
+- [`docs/OPERATOR-SIGNIN.md`](docs/OPERATOR-SIGNIN.md) — turning on the
+  console.
 
 ## What addy is for
 

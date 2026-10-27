@@ -82,14 +82,19 @@ services:
       ADDY_S3_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:?}
       ADDY_S3_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:?}
       ADDY_TURN_SECRET: ${ADDY_TURN_SECRET:?run install.sh}
-      # Narrowed from the 49152-65535 the design names. Two reasons, held in
-      # one place: WireGuard's 51820 sits inside that range and the collision
-      # is intermittent and start-order-dependent, which is the worst kind to
-      # debug; and 200 concurrent relayed sessions is far past what a
-      # single-box relay will ever see, while every firewall rule and provider
-      # firewall form scales with the number of ports.
-      ADDY_TURN_RELAY_MIN: ${ADDY_TURN_RELAY_MIN:-49160}
-      ADDY_TURN_RELAY_MAX: ${ADDY_TURN_RELAY_MAX:-49360}
+      # The relay runs only when it knows the address to advertise, and
+      # install.sh writes the IPv4 it detected. Empty means no relay. The
+      # relay range is the binary's, 61000-65535/udp, plus 3478/udp: there is
+      # no setting for it, so the firewall advice and the process cannot
+      # disagree. See internal/relay for why it starts at 61000.
+      ADDY_TURN_PUBLIC_IP: ${ADDY_TURN_PUBLIC_IP:-}
+      # The operator console. All three or none -- addy refuses to start with
+      # some of them -- and docs/OPERATOR-SIGNIN.md is how to get the values.
+      # Set them in .env, never here.
+      ADDY_OIDC_ISSUER: ${ADDY_OIDC_ISSUER:-}
+      ADDY_OIDC_CLIENT_ID: ${ADDY_OIDC_CLIENT_ID:-}
+      ADDY_OIDC_CLIENT_SECRET: ${ADDY_OIDC_CLIENT_SECRET:-}
+      ADDY_SIGNUP: ${ADDY_SIGNUP:-}
     volumes:
       # SQLite, certmagic's storage, and the PEM exported for other services.
       - addy-state:/var/lib/addy
@@ -97,7 +102,10 @@ services:
       garage:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/addy", "selftest", "-quick"]
+      # Loopback, naming the domain. Without -connect the probe resolved the
+      # domain through public DNS and so depended on the provider routing the
+      # box's own public address back to it, which many do not.
+      test: ["CMD", "/addy", "selftest", "-quick", "-connect", "127.0.0.1:443"]
       interval: 30s
       timeout: 20s
       retries: 3

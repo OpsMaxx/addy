@@ -33,10 +33,6 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - serve
-            - -domain={{ .Values.domain }}
-            {{- if .Values.acmeEmail }}
-            - -email={{ .Values.acmeEmail }}
-            {{- end }}
             {{- if .Values.portal.enabled }}
             - -ui
             {{- end }}
@@ -44,9 +40,39 @@ spec:
             - -turn-public-ip={{ .Values.turn.publicIP }}
             - -turn-port={{ .Values.turn.port }}
             {{- end }}
+          # The domain in the ENVIRONMENT rather than as a flag, so that
+          # `kubectl exec ... /addy selftest` and the probes below find it
+          # without being told.
           env:
             - name: ADDY_DATA_DIR
               value: /var/lib/addy
+            - name: ADDY_DOMAIN
+              value: {{ .Values.domain | quote }}
+            {{- if .Values.acmeEmail }}
+            - name: ADDY_ACME_EMAIL
+              value: {{ .Values.acmeEmail | quote }}
+            {{- end }}
+            {{- with .Values.oidc }}
+            {{- if .issuer }}
+            - name: ADDY_OIDC_ISSUER
+              value: {{ .issuer | quote }}
+            {{- end }}
+            {{- if .clientID }}
+            - name: ADDY_OIDC_CLIENT_ID
+              value: {{ .clientID | quote }}
+            {{- end }}
+            {{- if .clientSecretName }}
+            - name: ADDY_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .clientSecretName }}
+                  key: client-secret
+            {{- end }}
+            {{- if .signup }}
+            - name: ADDY_SIGNUP
+              value: {{ .signup | quote }}
+            {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 80
@@ -57,20 +83,30 @@ spec:
               containerPort: {{ .Values.turn.port }}
               protocol: UDP
             {{- end }}
-          # `selftest -quick`, which checks the instance ANSWERS OVER ITS OWN
-          # TLS rather than that the process is up. A relay that is running and
-          # cannot serve is the worst first impression the product can make,
-          # and "the container is running" is exactly the evidence that
-          # produces it.
+          # READINESS is `selftest -quick`, which checks the instance ANSWERS
+          # OVER ITS OWN TLS rather than that the process is up. It dials
+          # loopback and names the domain: these probes used to target
+          # `localhost:443`, and the front door drops every name it has no
+          # route for -- localhost included outside dev -- so the pod was
+          # never Ready.
+          #
+          # LIVENESS IS ONLY THE SOCKET, deliberately. Until the first
+          # certificate is issued the TLS check fails, and issuance waits on
+          # DNS, port 80 and the CA. A liveness probe that failed for that
+          # would restart the pod mid-order, and every restart spends Let's
+          # Encrypt's failed-validation limit -- turning a slow first issuance
+          # into one that cannot finish. Not Ready is the honest state for it;
+          # the Service still routes to it (publishNotReadyAddresses) so the
+          # ACME challenge can arrive.
           livenessProbe:
-            exec:
-              command: ["/addy", "selftest", "-quick", "-target", "localhost:443"]
-            initialDelaySeconds: 20
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 10
             periodSeconds: 30
-            timeoutSeconds: 10
+            timeoutSeconds: 5
           readinessProbe:
             exec:
-              command: ["/addy", "selftest", "-quick", "-target", "localhost:443"]
+              command: ["/addy", "selftest", "-quick", "-connect", "127.0.0.1:443"]
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 10

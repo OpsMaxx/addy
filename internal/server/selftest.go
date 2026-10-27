@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -44,6 +45,17 @@ type SelftestOptions struct {
 	Invite  string
 	// Insecure accepts a self-signed certificate, for `-dev`.
 	Insecure bool
+	// Connect is the address to dial instead of resolving Target, which
+	// still names the host: it is the SNI and the Host header.
+	//
+	// It exists for the probes. The front door drops every name it has no
+	// route for -- `localhost` included, outside dev -- so a probe that
+	// targets localhost fails forever, and one that targets the domain goes
+	// out through public DNS and depends on the provider hairpinning the
+	// box's own address back to it. Dialling loopback while naming the
+	// domain asks the question a probe means: does THIS process answer for
+	// the name it serves?
+	Connect string
 }
 
 func SelftestWith(ctx context.Context, opts SelftestOptions) error {
@@ -58,7 +70,7 @@ func SelftestWith(ctx context.Context, opts SelftestOptions) error {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	meta, err := fetchMeta(ctx, target)
+	meta, err := fetchMeta(ctx, target, opts.Connect)
 	if err != nil {
 		return err
 	}
@@ -130,6 +142,9 @@ func selftestInvite(ctx context.Context, opts SelftestOptions) (string, func(), 
 func runCycle(ctx context.Context, target, invite string, opts SelftestOptions) error {
 	base := "https://" + target
 	first := client.New(base, opts.Insecure)
+	if opts.Connect != "" {
+		first.HTTP.Transport.(*http.Transport).DialContext = dialOnly(opts.Connect)
+	}
 
 	acct, err := first.Register("selftest-first", invite)
 	if err != nil {
@@ -213,18 +228,27 @@ type meta struct {
 	Build   string `json:"build"`
 }
 
-func fetchMeta(ctx context.Context, target string) (meta, error) {
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{
-			// A self-signed development certificate must not make the
-			// healthcheck fail, and this request goes to the instance's own
-			// loopback. What is being proved here is that the process answers
-			// over TLS at all -- the certificate's trustworthiness is
-			// preflight's job, and it uses a real CA to answer it.
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
+// dialOnly sends every connection to addr, whatever the URL's host says.
+func dialOnly(addr string) func(context.Context, string, string) (net.Conn, error) {
+	var d net.Dialer
+	return func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return d.DialContext(ctx, network, addr)
 	}
+}
+
+func fetchMeta(ctx context.Context, target, connect string) (meta, error) {
+	tr := &http.Transport{
+		// A self-signed development certificate must not make the
+		// healthcheck fail, and this request goes to the instance's own
+		// loopback. What is being proved here is that the process answers
+		// over TLS at all -- the certificate's trustworthiness is
+		// preflight's job, and it uses a real CA to answer it.
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	if connect != "" {
+		tr.DialContext = dialOnly(connect)
+	}
+	client := &http.Client{Timeout: 15 * time.Second, Transport: tr}
 
 	url := "https://" + target + "/v1/meta"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
