@@ -141,11 +141,15 @@ jobs:
       # The image's binary is its own build, from the Dockerfile, so scanning
       # dist/ says nothing about it. Copied out of both platforms -- create,
       # not run, so arm64 needs no emulation.
+      # Each platform by its own manifest digest. Creating both from the index
+      # digest with --platform failed on the second one ("cannot overwrite
+      # digest") on runners using the containerd image store.
       - name: Copy the image's binaries out for scanning
         run: |
           mkdir -p image
           for p in amd64 arm64; do
-            c=$(docker create --platform "linux/$p" "$IMAGE")
+            d=$(docker buildx imagetools inspect --raw "$IMAGE" | jq -r --arg a "$p" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest')
+            c=$(docker create "${IMAGE%@*}@$d")
             docker cp "$c:/addy" "image/addy_image_linux_$p"
             docker rm "$c" >/dev/null
           done
