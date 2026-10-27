@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -29,7 +31,11 @@ func selfSigned(names []string, ips []net.IP) (tls.Certificate, []byte, []byte, 
 	if err != nil {
 		return tls.Certificate{}, nil, nil, fmt.Errorf("generating dev key: %w", err)
 	}
+	return selfSignedWith(key, names, ips)
+}
 
+// selfSignedWith signs a fresh certificate over an existing key.
+func selfSignedWith(key *ecdsa.PrivateKey, names []string, ips []net.IP) (tls.Certificate, []byte, []byte, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return tls.Certificate{}, nil, nil, fmt.Errorf("generating serial: %w", err)
@@ -81,4 +87,64 @@ func selfSigned(names []string, ips []net.IP) (tls.Certificate, []byte, []byte, 
 // ships, and the point of a test is to exercise what ships.
 func SelfSignedForTest(names []string) (tls.Certificate, []byte, []byte, error) {
 	return selfSigned(names, nil)
+}
+
+// devKey returns the development certificate's key, created once and kept.
+//
+// THE KEY, NOT THE CERTIFICATE, IS WHAT A CLIENT PINS. A -dev relay used to
+// mint a new key on every start, so restarting it changed its SPKI and every
+// device that had paired with it -- which pins, and refuses a change for a
+// relay it reaches with insecure TLS -- was locked out. Keeping the key and
+// signing a fresh certificate over it at each start is the dev twin of
+// certmagic's ReusePrivateKeys: the names and expiry stay current, the pin
+// does not move.
+//
+// Kept in the certificate store, so `addy panic` deletes it with the real
+// ones -- the one time a new key is the point. Regenerated only when missing
+// or unreadable.
+func devKey(dir string) (*ecdsa.PrivateKey, error) {
+	path := filepath.Join(dir, "dev-key.pem")
+	if b, err := os.ReadFile(path); err == nil {
+		if block, _ := pem.Decode(b); block != nil {
+			if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+				if ec, ok := k.(*ecdsa.PrivateKey); ok {
+					return ec, nil
+				}
+			}
+		}
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generating dev key: %w", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling dev key: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("creating %s: %w", dir, err)
+	}
+	// Written aside and renamed, 0600 from the moment it exists, so a crash
+	// mid-write leaves the old key or none -- never half of one.
+	tmp, err := os.CreateTemp(dir, "dev-key-*.tmp")
+	if err != nil {
+		return nil, fmt.Errorf("saving dev key: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return nil, fmt.Errorf("saving dev key: %w", err)
+	}
+	if err := pem.Encode(tmp, &pem.Block{Type: "PRIVATE KEY", Bytes: der}); err != nil {
+		tmp.Close()
+		return nil, fmt.Errorf("saving dev key: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("saving dev key: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return nil, fmt.Errorf("saving dev key: %w", err)
+	}
+	return key, nil
 }
