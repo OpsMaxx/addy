@@ -181,7 +181,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	if cfg.Dev {
-		if err := frontdoor.DevCertificate(ctx, magic, export, routes.Hosts()); err != nil {
+		if err := frontdoor.DevCertificate(ctx, magic, export, cfg.DataDir, routes.Hosts()); err != nil {
 			return err
 		}
 	} else if hosts := routes.Hosts(); len(hosts) > 0 {

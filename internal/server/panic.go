@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/opsmaxx/addy/internal/frontdoor"
 	"github.com/opsmaxx/addy/internal/store"
 )
 
@@ -27,7 +28,7 @@ import (
 // Deleting it costs one issuance -- certmagic registers a new account and
 // re-issues on the next request, which is a few seconds of first-connection
 // latency, once.
-const certDirName = "certmagic"
+const certDirName = frontdoor.CertDir
 
 // PanicOptions is what `addy panic` was told to do.
 type PanicOptions struct {

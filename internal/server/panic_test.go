@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/opsmaxx/addy/internal/frontdoor"
 	"github.com/opsmaxx/addy/internal/server"
 	"github.com/opsmaxx/addy/internal/store"
 )
@@ -38,7 +39,7 @@ func panicFixture(t *testing.T) string {
 	}
 	db.Close()
 
-	certs := filepath.Join(dir, "certmagic", "acme")
+	certs := filepath.Join(dir, frontdoor.CertDir, "acme")
 	if err := os.MkdirAll(certs, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestPanicDeletesTheAcmeAccountKey(t *testing.T) {
 	// Whoever holds this key can ask Let's Encrypt to issue for any domain
 	// this instance has already validated, from anywhere. A box that is
 	// otherwise clean and still has it is not clean.
-	if _, err := os.Stat(filepath.Join(dir, "certmagic")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, frontdoor.CertDir)); !os.IsNotExist(err) {
 		t.Fatalf("the certificate store survived the panic: %v", err)
 	}
 }
@@ -123,7 +124,7 @@ func TestPanicCanKeepCertificates(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Panic: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "certmagic", "acme", "account.key")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, frontdoor.CertDir, "acme", "account.key")); err != nil {
 		t.Fatalf("-keep-certs deleted them anyway: %v", err)
 	}
 	// And the rest still happened: the flag is what stops the box serving, and

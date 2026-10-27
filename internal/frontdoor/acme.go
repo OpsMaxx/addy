@@ -56,12 +56,19 @@ type ACMEConfig struct {
 //
 // Verified in solvers.go at v0.25.4. The identical shape is in
 // tlsALPNSolver.Present for :443.
+// CertDir is the certificate store under the data directory: certmagic's
+// certificates and keys, the ACME account, and the development key. One name,
+// shared with `addy panic`, which deletes it -- the panic used to delete a
+// directory called "certmagic" that nothing wrote, and left every key in place
+// while reporting them gone.
+const CertDir = "certs"
+
 func NewACME(c ACMEConfig) (*tls.Config, func(http.Handler) http.Handler, *certmagic.Config, error) {
 	if c.Routes == nil {
 		return nil, nil, nil, fmt.Errorf("frontdoor: NewACME needs a routing table")
 	}
 
-	certmagic.Default.Storage = &certmagic.FileStorage{Path: filepath.Join(c.DataDir, "certs")}
+	certmagic.Default.Storage = &certmagic.FileStorage{Path: filepath.Join(c.DataDir, CertDir)}
 	// The status recorder wraps whatever else is listening, so an operator can
 	// be told WHY TLS is not working rather than only that it is not. See
 	// acmestatus.go: the client-side symptom names no cause and reads like a
@@ -165,8 +172,15 @@ func NewACME(c ACMEConfig) (*tls.Config, func(http.Handler) http.Handler, *certm
 // Table.Decide including its refusal path, the fake listener, the reverse
 // proxies, the passthrough splice, and the exporter -- files, permissions and
 // reload included. Only the issuer and the three challenge types are bypassed.
-func DevCertificate(ctx context.Context, magic *certmagic.Config, export *Exporter, names []string) error {
-	cert, certPEM, keyPEM, err := selfSigned(names, []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback})
+//
+// The key persists in dataDir's certificate store across restarts, so a
+// device's pin survives one -- see devKey.
+func DevCertificate(ctx context.Context, magic *certmagic.Config, export *Exporter, dataDir string, names []string) error {
+	key, err := devKey(filepath.Join(dataDir, CertDir))
+	if err != nil {
+		return err
+	}
+	cert, certPEM, keyPEM, err := selfSignedWith(key, names, []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback})
 	if err != nil {
 		return err
 	}
