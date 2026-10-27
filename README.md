@@ -5,24 +5,15 @@ A self-hosted, end-to-end-encrypted satellite relay for
 sync, continuity between your own machines, and a deployment helper for a small
 set of self-hosted services.
 
-**Status: working, and not yet released.** The relay runs: account creation
-by invite, the signed device roster, sealed-object sync with conflict keeping,
-store-and-forward mail, pairing, an embedded TURN relay, one-time pastes, its
-own TLS front door with ACME, and an optional operator console at `/admin`.
-OpsMaxx's *Sync & devices* page is its client.
+The relay does account creation by invite, the signed device roster,
+sealed-object sync with conflict keeping, store-and-forward mail, pairing, an
+embedded TURN relay, one-time pastes, its own TLS front door with ACME, and an
+optional operator console at `/admin`. OpsMaxx's *Sync & devices* page is its
+client.
 
 Each release tag publishes the image at `ghcr.io/opsmaxx/addy:<version>`
 (and `:latest` for a non-prerelease), binaries for five platforms, and the
-compose bundle the installer fetches -- which is what the install paths below
-pull. **No version has been tagged yet**, so until one is, build from source
-with `scripts/build.sh`, or try it locally with `go run ./cmd/addy serve -dev`.
-
-> While this repository is private, so is what it publishes: a GHCR package
-> pushed from a private repository starts private, and private release files
-> need a token. Pulling then needs `docker login ghcr.io` with a token that can
-> read the package, and the installer's bundle download fails. Making the
-> package public is a setting on the package, and a decision for whoever owns
-> it.
+compose bundle the installer fetches.
 
 `docs/DESIGN.md` is the design of record, including the corrections an
 adversarial review forced before a line of code existed. Where the code
@@ -31,11 +22,23 @@ there yet. Read
 [`THREAT_MODEL.md`](THREAT_MODEL.md) before you read anything else, because the
 whole point of addy is what it is *not* trusted with.
 
-## Running one
+## Install
 
-- [`deploy/compose/install.sh`](deploy/compose/install.sh) — one box with
-  Docker. It checks DNS and port 80 before it writes anything, and re-running
-  it upgrades.
+On a box with Docker, a public IPv4 address, ports 80 and 443 free, and a DNS
+name pointing at it (at least 512 MiB of RAM, 1 vCPU and 2 GiB of disk):
+
+```sh
+curl -fsSL https://get.opsmaxx.dev/addy/install.sh | sh
+```
+
+It asks for the domain (or takes `sh -s -- --yes --domain addy.example.com`),
+checks DNS and port 80 before it writes anything, gets a certificate, and ends
+by showing how to mint an invite for your first device. Re-running it upgrades. The DNS name must not be proxied by a CDN that ends TLS (such as
+Cloudflare's orange cloud): logins bind the relay's own TLS key, so a proxy
+that presents a different one is refused.
+
+- [`deploy/compose/install.sh`](deploy/compose/install.sh) — the script
+  above, to read before you pipe it into a shell.
 - [`deploy/helm/addy`](deploy/helm/addy) — Kubernetes, for when you already
   have a cluster. Read the top of `values.yaml` first.
 - [`docs/ADMIN.md`](docs/ADMIN.md) — what an operator can and cannot do, the
