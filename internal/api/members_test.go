@@ -65,8 +65,8 @@ func addedDevice(t *testing.T, srv string, a *client.Client, acct *protocol.Acco
 	return b, add
 }
 
-// status makes a signed request and returns its status and error message.
-func status(t *testing.T, c *client.Client, method, path string, payload any) (int, string) {
+// callStatus makes a signed request and returns its status and error message.
+func callStatus(t *testing.T, c *client.Client, method, path string, payload any) (int, string) {
 	t.Helper()
 	resp, err := c.RawRequest(method, path, payload)
 	if err != nil {
@@ -108,7 +108,7 @@ func TestAStrangersKeyReachesOnlyRecovery(t *testing.T) {
 		{http.MethodGet, "/v1/changes"},
 		{http.MethodGet, "/v1/turn"},
 	} {
-		code, msg := status(t, stranger, c.method, c.path, map[string]any{})
+		code, msg := callStatus(t, stranger, c.method, c.path, map[string]any{})
 		if code != http.StatusUnauthorized || msg != "this device is not on its sync group's roster" {
 			t.Errorf("%s %s by a stranger = %d %q, want 401", c.method, c.path, code, msg)
 		}
@@ -118,7 +118,7 @@ func TestAStrangersKeyReachesOnlyRecovery(t *testing.T) {
 	}
 
 	// It may read what a recovery reads.
-	if code, _ := status(t, stranger, http.MethodGet, "/v1/roster", nil); code != http.StatusOK {
+	if code, _ := callStatus(t, stranger, http.MethodGet, "/v1/roster", nil); code != http.StatusOK {
 		t.Errorf("a limited session could not read the roster: %d", code)
 	}
 
@@ -166,11 +166,11 @@ func TestARevokedDeviceLosesItsSessionAndCannotLogIn(t *testing.T) {
 
 	// Its live session is over -- and NOT with "unknown or expired session",
 	// which a client answers by logging in again.
-	code, msg := status(t, b, http.MethodGet, "/v1/obj/servers?epoch=1", nil)
+	code, msg := callStatus(t, b, http.MethodGet, "/v1/obj/servers?epoch=1", nil)
 	if code != http.StatusUnauthorized || msg != "this device has been removed from its sync group" {
 		t.Errorf("the revoked device's session answered %d %q", code, msg)
 	}
-	if code, _ := status(t, b, http.MethodGet, "/v1/roster", nil); code != http.StatusOK {
+	if code, _ := callStatus(t, b, http.MethodGet, "/v1/roster", nil); code != http.StatusOK {
 		t.Errorf("the revoked device cannot read the roster that tells it to wipe: %d", code)
 	}
 	// A fresh login is refused, 403, with a chain the device can verify under
