@@ -6,7 +6,7 @@
 // in should not present itself as an administration console, because it is not
 // administering anything.
 
-import { $, api, boot, bytes, cell, clearProblem, copy, fail, relayLink, shortId, when, wireMint } from './console-kit.js'
+import { $, api, boot, bytes, cell, clearProblem, copy, fail, labelCells, relayLink, shortId, when, wireMint } from './console-kit.js'
 
 async function loadMine() {
   const { accounts } = await api('/admin/v1/my/accounts')
@@ -17,12 +17,6 @@ async function loadMine() {
   $('my-accounts-shell').hidden = !some
   $('stats').hidden = !some
   $('no-mine').hidden = some
-
-  // The card above is re-drawn from the same count on every load (see
-  // paintLead), so "above" is true whichever way the count went — including
-  // straight after the delete below took it to zero.
-  $('no-mine-text').textContent =
-    'Nothing of yours is on this relay yet. Create an invite above and paste it into OpsMaxx: that sets up your first device and creates the group it syncs into.'
 
   let entries = 0
   let used = 0
@@ -59,8 +53,12 @@ async function loadMine() {
         await api(`/admin/v1/my/accounts/${encodeURIComponent(a.accountId)}`, { method: 'DELETE' })
         // The count is what the lead card is drawn from, so it is redrawn
         // too: deleting your only group is exactly when the invite button has
-        // to come back.
-        paintLead(await loadMine())
+        // to come back. Through reload, the one path that also re-reads who
+        // you are — a direct paint here once ran without that and threw. A
+        // refresh already running may have read the list before the delete,
+        // so it is let finish and a fresh one taken.
+        await inFlight
+        await reload()
       } catch (err) {
         fail(err)
       }
@@ -76,6 +74,7 @@ async function loadMine() {
     )
     body.append(tr)
   }
+  labelCells(body)
 
   // DEVICES ARE WHAT A PERSON HAS; a sync group is an implementation detail
   // they only need when they have two. Counted from the same rows the table
@@ -133,9 +132,16 @@ function paintLead(groups, me) {
     $('invite-blurb').textContent =
       'This relay gives storage to the people its operator admits, and you have not been admitted yet. Ask whoever runs it; once they have, this page lets you set up your first device without them.'
   }
+  // The empty state below the card says the same thing the card does, or it
+  // points at a button that is not there.
+  $('no-mine-text').textContent = mayMint
+    ? 'Nothing of yours is on this relay yet. Create an invite above and paste it into OpsMaxx: that sets up your first device and creates the group it syncs into.'
+    : 'Nothing of yours is on this relay yet. Once whoever runs it admits you, the card above lets you create the invite that sets up your first device.'
 
   $('mint-mine-row').hidden = !first || !mayMint
-  $('operator-made').hidden = !first
+  // Addressed to somebody an operator set up before they signed in — which
+  // the operator, reading their own console, never is.
+  $('operator-made').hidden = !first || me.operator === true
   $('pair-steps').hidden = first
   // An invite still on screen once a device has registered is spent: it
   // would only invite somebody to paste it a second time and be refused.
@@ -144,6 +150,9 @@ function paintLead(groups, me) {
       $(id).hidden = true
     }
     $('mint-mine-note').textContent = ''
+    // wireMint leaves the button spent after it has shown an invite; if this
+    // group is deleted later, the next first device needs a live one.
+    $('mint-mine').disabled = false
   }
 }
 
@@ -177,6 +186,10 @@ function paintLead(groups, me) {
  */
 function wireLead() {
   wireMint({
+    // One invite per page: a member gets at most one sync group, so a second
+    // token while the first sits unspent on screen is only a way to paste the
+    // wrong one. The operator's card mints for many people and stays live.
+    once: true,
     button: $('mint-mine'),
     note: $('mint-mine-note'),
     out: $('invite-mine'),
@@ -194,6 +207,33 @@ function wireLead() {
       ? 'Copied.'
       : 'This browser would not let the page copy it — select it and copy by hand.'
   })
+}
+
+/**
+ * Who is reading, and how many sync groups they have, read again together.
+ *
+ * BOTH CAN CHANGE UNDER AN OPEN TAB. The count changes when a device
+ * registers from OpsMaxx or a group is deleted; whether you may mint changes
+ * when the operator admits you or withdraws it. A refresh that re-read only
+ * the count kept a button the server would now refuse, or kept hiding one it
+ * would now allow. This is the only caller of paintLead after the first paint,
+ * so the card cannot be painted from half an answer.
+ *
+ * One at a time: a tab switch can fire `focus` and `visibilitychange` both,
+ * and the second caller is handed the load already running.
+ */
+let inFlight = null
+function reload() {
+  // Signed out underneath us: the session handler has already removed the
+  // page this would be painting into.
+  if (!$('mine')) return Promise.resolve()
+  inFlight ??= Promise.all([api('/admin/v1/me'), loadMine()])
+    .then(([me, groups]) => paintLead(groups, me))
+    .catch(fail)
+    .finally(() => {
+      inFlight = null
+    })
+  return inFlight
 }
 
 async function main() {
@@ -221,24 +261,10 @@ async function main() {
   // into OpsMaxx, in another window; the device registers there; and the
   // person returns here to a card still saying "set up your first device"
   // over an empty table. `focus` covers switching back from another
-  // application, `visibilitychange` switching back from another tab, and one
-  // switch can fire both — so a load already in flight is reused rather than
-  // doubled.
-  let inFlight = null
-  const refresh = () => {
-    // Signed out underneath us: the session handler has already removed the
-    // page this would be painting into.
-    if (inFlight || !$('mine')) return
-    inFlight = loadMine()
-      .then((n) => paintLead(n, me))
-      .catch(fail)
-      .finally(() => {
-        inFlight = null
-      })
-  }
-  window.addEventListener('focus', refresh)
+  // application, `visibilitychange` switching back from another tab.
+  window.addEventListener('focus', () => void reload())
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') refresh()
+    if (document.visibilityState === 'visible') void reload()
   })
 }
 

@@ -188,32 +188,38 @@ async function main() {
   $('burn-warning').hidden = !burns
   show('ready')
 
+  // Held across clicks. Once the POST has answered, the relay has nothing
+  // left to give — but this page still has every byte, so a mistyped
+  // password is retried against these rather than lost with them.
+  let sealed
+
   $('reveal').addEventListener('click', async () => {
     $('reveal').disabled = true
     const password = $('password').value
 
-    let sealed
-    try {
-      // THE POST. This is the only thing that consumes, which is what stops a
-      // chat client's preview fetch burning the message before the human sees
-      // it.
-      const resp = await fetch(`/v1/paste/${encodeURIComponent(id)}/burn`, {
-        method: 'POST',
-        cache: 'no-store'
-      })
-      if (resp.status === 410) {
-        fail('This message has already been read', 'Somebody opened it between this page loading and you pressing the button.')
+    if (!sealed) {
+      try {
+        // THE POST. This is the only thing that consumes, which is what stops a
+        // chat client's preview fetch burning the message before the human sees
+        // it.
+        const resp = await fetch(`/v1/paste/${encodeURIComponent(id)}/burn`, {
+          method: 'POST',
+          cache: 'no-store'
+        })
+        if (resp.status === 410) {
+          fail('This message has already been read', 'Somebody opened it between this page loading and you pressing the button.')
+          return
+        }
+        if (!resp.ok) {
+          fail('The relay refused', 'It answered ' + resp.status + '.')
+          return
+        }
+        sealed = b64decode((await resp.json()).sealed)
+      } catch {
+        fail('Could not reach the server', 'The relay did not answer.')
+        $('reveal').disabled = false
         return
       }
-      if (!resp.ok) {
-        fail('The relay refused', 'It answered ' + resp.status + '.')
-        return
-      }
-      sealed = b64decode((await resp.json()).sealed)
-    } catch {
-      fail('Could not reach the server', 'The relay did not answer.')
-      $('reveal').disabled = false
-      return
     }
 
     let content
@@ -222,12 +228,16 @@ async function main() {
     } catch (err) {
       if (err && err.message === 'WRONG_KEY') {
         // The message is gone from the server either way -- the POST consumed
-        // it. Saying so matters: a reader who thinks they can retry will keep
-        // trying a link that no longer exists.
-        fail(
-          password ? 'That password is wrong' : 'This message needs a password',
-          'The message has already been taken off the relay, so this page is the only chance to open it. Ask the sender for the password and for a new link.'
-        )
+        // it -- but not from this page. So the reader stays on the form and
+        // tries again, and is told plainly that the page is the only copy:
+        // a reader who reloads, or retries the link, finds nothing.
+        $('password-wrong').textContent =
+          (password ? 'That password does not open it.' : 'This message needs a password.') +
+          ' It has already been taken off the relay, but this page still holds it: try again here, and do not close or reload the page.'
+        $('password-wrong').hidden = false
+        $('reveal').textContent = 'Try this password'
+        $('reveal').disabled = false
+        $('password').focus()
         return
       }
       fail('That message could not be opened', String(err && err.message ? err.message : err))

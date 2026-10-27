@@ -392,8 +392,27 @@ func TestTheLeadCardFollowsTheCountBothWays(t *testing.T) {
 			t.Errorf("console.js does not paint #%s from the count", id)
 		}
 	}
-	if !strings.Contains(js, "paintLead(await loadMine())") {
-		t.Error("deleting a sync group re-reads the count without repainting the card drawn from it")
+	// THE CARD IS DRAWN FROM TWO ANSWERS, the count and whether you may mint,
+	// and every paint has to be handed both. A paint after a delete was once
+	// handed only the count, and threw on `me.mayMint` with the card half
+	// redrawn.
+	paints := regexp.MustCompile(`paintLead\(([^)]*)\)`).FindAllStringSubmatch(js, -1)
+	if len(paints) < 3 {
+		t.Fatalf("the parser is wrong, not the code: %d paintLead calls", len(paints))
+	}
+	for _, m := range paints[1:] { // [0] is the definition
+		if args := strings.Split(m[1], ","); len(args) != 2 || strings.TrimSpace(args[1]) != "me" {
+			t.Errorf("paintLead(%s) is not handed `me`", m[1])
+		}
+	}
+	// And a re-read reads both: the operator admits or withdraws while the tab
+	// is open, and a refresh of the count alone kept the old answer.
+	reload := js[strings.Index(js, "function reload()"):]
+	if !strings.Contains(reload[:strings.Index(reload, "\n}\n")], "api('/admin/v1/me')") {
+		t.Error("reload() does not re-read /admin/v1/me, so whether you may mint goes stale under an open tab")
+	}
+	if !strings.Contains(js, "await reload()") {
+		t.Error("deleting a sync group does not go through reload(), so the card is not repainted")
 	}
 	for _, ev := range []string{"'focus'", "'visibilitychange'"} {
 		if !strings.Contains(js, "addEventListener("+ev) {
@@ -418,8 +437,18 @@ func TestThePasswordIsAskedForBeforeTheMessageIsUsedUp(t *testing.T) {
 	if strings.Index(page, `id="password"`) > strings.Index(page, `id="reveal"`) {
 		t.Error("the password field comes after the button that burns the message")
 	}
-	if strings.Contains(readWeb(t, "paste.js"), "$('password-row').hidden") {
+	js := readWeb(t, "paste.js")
+	if strings.Contains(js, "$('password-row').hidden") {
 		t.Error("paste.js toggles #password-row; it has to be there before the burn, not after")
+	}
+	// A WRONG password must not lose the message: the page holds the bytes
+	// after the burn, so a retry decrypts them again rather than asking the
+	// relay for what it no longer has.
+	if !strings.Contains(js, "if (!sealed) {") {
+		t.Error("paste.js burns on every click; a retry after a wrong password would find the message gone")
+	}
+	if !strings.Contains(js, "$('password-wrong').hidden = false") {
+		t.Error("a wrong password leaves the form instead of offering a retry")
 	}
 }
 
@@ -455,6 +484,15 @@ func TestTheCopyUsesTheNamingContract(t *testing.T) {
 		{"console-kit.js", "no longer lets this account sign in"},
 		{"relay.html", "belongs to no sign-in"},
 		{"console.html", `id="operator-made"`},
+		// Where a member first meets "sync group", the word the app uses.
+		{"console.html", "calls your <em>account</em>"},
+		// The app's pairing link fills both fields; the steps say so.
+		{"console.html", "fills in both this relay's"},
+		// Not admitted: the empty state must not point at a missing button.
+		{"console.js", "Once whoever runs it admits you"},
+		{"console.html", `id="signed-out-note" class="notice" role="status"`},
+		{"relay.html", `id="signed-out-note" class="notice" role="status"`},
+		{"relay.html", `<th class="right">Actions</th>`},
 	} {
 		if !strings.Contains(readWeb(t, c.file), c.phrase) {
 			t.Errorf("%s no longer says %q", c.file, c.phrase)
@@ -525,6 +563,30 @@ func TestEveryThemeClearsAAWhereItWasMeasuredFailing(t *testing.T) {
 			if r := contrast(t, fg, bg); r < 4.5 {
 				t.Errorf("%s: %s %s on %s %s is %.2f:1, under 4.5:1", sel, p[0], fg, p[1], bg, r)
 			}
+		}
+	}
+}
+
+func TestTablesStackAtPhoneWidth(t *testing.T) {
+	// At 375px the People table was 776px in a 325px box, and the column
+	// that scrolled out of reach was Admit and Block. Below the narrow
+	// breakpoint every row stacks, each cell labelled from its header — which
+	// only works if every script that fills a listing labels its cells.
+	css := readWeb(t, "portal.css")
+	narrow := css[strings.Index(css, "@media (max-width: 34rem)"):]
+	for _, rule := range []string{".listing thead {\n    display: none;", ".listing td[data-label]::before", "min-width: 0;"} {
+		if !strings.Contains(narrow, rule) {
+			t.Errorf("the narrow-screen block in portal.css has no %q", rule)
+		}
+	}
+	for _, js := range []string{"console.js", "relay.js"} {
+		src := readWeb(t, js)
+		fills := strings.Count(src, "body.append(tr)")
+		if fills == 0 {
+			t.Fatalf("the parser is wrong, not the code: %s fills no table", js)
+		}
+		if got := strings.Count(src, "labelCells(body)"); got < fills {
+			t.Errorf("%s fills %d tables and labels %d; an unlabelled one stacks as bare values", js, fills, got)
 		}
 	}
 }

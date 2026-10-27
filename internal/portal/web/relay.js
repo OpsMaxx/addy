@@ -12,7 +12,7 @@
 // device list belongs in OpsMaxx, where the keys are, and this page says so
 // rather than offering a button that cannot work.
 
-import { $, api, boot, bytes, cell, clearProblem, fail, shortId, when, wireMint } from './console-kit.js'
+import { $, api, boot, bytes, cell, clearProblem, fail, labelCells, shortId, when, wireMint } from './console-kit.js'
 
 async function loadUsers(me) {
   const { users } = await api('/admin/v1/users')
@@ -115,6 +115,7 @@ async function loadUsers(me) {
     tr.append(actions)
     body.append(tr)
   }
+  labelCells(body)
 }
 
 async function loadAccounts(me) {
@@ -202,6 +203,7 @@ async function loadAccounts(me) {
     tr.append(shortId(a.accountId), owner, cell(String(a.rosterEntries)), cell(bytes(a.usedBytes)), quota, actions)
     body.append(tr)
   }
+  labelCells(body)
 }
 
 async function refreshAll(me) {

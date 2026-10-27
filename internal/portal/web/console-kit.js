@@ -193,6 +193,21 @@ export function shortId(id) {
   return td
 }
 
+/**
+ * Copies each column's header onto its cells as `data-label`, which is what
+ * the narrow-screen stylesheet prints in front of a cell once the header row
+ * is gone. Read from the header the page already has, so the two cannot
+ * disagree; called after every fill, because a fill replaces the rows.
+ */
+export function labelCells(tbody) {
+  const heads = [...tbody.closest('table').querySelectorAll('thead th')].map((th) => th.textContent.trim())
+  for (const tr of tbody.rows) {
+    ;[...tr.cells].forEach((td, i) => {
+      if (heads[i]) td.dataset.label = heads[i]
+    })
+  }
+}
+
 export function cell(text, cls) {
   const td = document.createElement('td')
   if (cls) td.className = cls
@@ -244,8 +259,9 @@ function inviteLink(invite) {
   return `${relayLink()}&invite=${encodeURIComponent(invite)}`
 }
 
-export function wireMint({ button, note, out, warn, path, plain, plainLabel }) {
+export function wireMint({ button, note, out, warn, path, plain, plainLabel, once }) {
   button.addEventListener('click', async () => {
+    let shown = false
     button.disabled = true
     note.textContent = 'Creating…'
     clearProblem()
@@ -275,11 +291,14 @@ export function wireMint({ button, note, out, warn, path, plain, plainLabel }) {
       // control becomes unreachable without anybody noticing. The contract
       // test refused it, correctly.
       if (plainLabel) plainLabel.hidden = false
+      shown = true
     } catch (err) {
       note.textContent = ''
       fail(err)
     } finally {
-      button.disabled = false
+      // A failure always gives the button back; a success does only where
+      // the caller mints for more than one person.
+      button.disabled = once === true && shown
     }
   })
 }

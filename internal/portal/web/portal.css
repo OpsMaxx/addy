@@ -614,7 +614,8 @@ table.listing,
   background: transparent;
 }
 
-.listing td.right {
+.listing td.right,
+.listing th.right {
   text-align: right;
   white-space: nowrap;
 }
@@ -847,6 +848,12 @@ main.paste button {
   cursor: pointer;
 }
 
+/* The retry prompt after a wrong password: the one line on this page that is
+   an error rather than an explanation. */
+main.paste #password-wrong {
+  color: var(--danger-chip-ink);
+}
+
 main.paste button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -892,5 +899,67 @@ main.paste .fine {
      wrapping into a ragged stack. */
   .card > p > .button {
     width: 100%;
+  }
+
+  /* TABLES STACK HERE INSTEAD OF SCROLLING. At phone width the People table
+     was 776px inside a 325px box, and the column that scrolled out of sight
+     first was the last one — Admit and Block — with nothing to say there was
+     more to the right. Each row becomes a block, each cell a line labelled
+     with its column's header (copied onto the cell as data-label by
+     labelCells in console-kit.js), and the actions wrap onto the last line
+     where a thumb can reach them. */
+  table.listing,
+  .listing {
+    min-width: 0;
+  }
+
+  .listing thead {
+    display: none;
+  }
+
+  .listing tr {
+    display: block;
+    padding: var(--sp-3) 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .listing tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .listing td,
+  .listing td + td,
+  .listing td.right {
+    display: block;
+    padding: var(--sp-1) 0;
+    border: none;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .listing td[data-label]::before {
+    content: attr(data-label);
+    display: inline-block;
+    min-width: 8.5rem;
+    color: var(--text-faint);
+    font-family: var(--font-ui);
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    letter-spacing: var(--tracking-caption);
+    text-transform: uppercase;
+  }
+
+  /* The buttons name themselves; "Actions" above them is noise. */
+  .listing td.right::before {
+    content: none;
+  }
+
+  .listing td.right {
+    padding-top: var(--sp-2);
+  }
+
+  /* Your own row has no actions; an empty line would read as missing ones. */
+  .listing td.right:empty {
+    display: none;
   }
 }
