@@ -86,11 +86,11 @@ type sessionRecord struct {
 	// before it can add itself. It reaches only recoveryRoute; an add naming
 	// it lifts the limit (members.go).
 	limited bool
-	// removed is a device a revoke took off the roster. It reads the roster,
-	// which is how it learns to wipe itself, and nothing else. A live session
-	// is marked rather than deleted, so its next request is told why instead
-	// of "unknown or expired session" -- which a client answers by logging in
-	// again, and that would get it nothing more.
+	// removed is a session whose device a revoke took off the roster while it
+	// was live. It reads the roster, which is how it learns to wipe itself, and
+	// nothing else. Marked rather than deleted, so its next request is told why
+	// instead of "unknown or expired session", which a client answers by
+	// logging in again.
 	removed bool
 }
 
@@ -233,23 +233,35 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	// says the server MUST reject a login whose account the key does not
 	// belong to.
 	//
-	// Two kinds of key off the roster still get a session, each reaching only
-	// what it cannot do without (members.go, refusal):
-	//
-	//  - A key the roster never named, because of RECOVERY. A device restoring
-	//    from the phrase mints fresh keys and must read the escrow and the
-	//    roster before it can append the root-signed entry that adds it, and
-	//    OpsMaxx 0.58 does exactly that with the session this hands out.
-	//  - A key the roster removed, because REVOCATION IS DELIVERED BY READING
-	//    THE ROSTER. A revoked laptop wipes itself when it next logs in and
-	//    finds itself absent; refusing its login would leave the stolen one
-	//    holding everything, which is the case the wipe exists for. It reads
-	//    the roster and nothing else.
+	// A key the roster never named still gets a LIMITED session, because of
+	// RECOVERY: a device restoring from the phrase mints fresh keys and must
+	// read the escrow and the roster before it can append the root-signed
+	// entry that adds it, and OpsMaxx 0.58 does exactly that with the session
+	// this hands out. It reaches only recoveryRoute (members.go).
 	s.auth.roster.Lock()
 	defer s.auth.roster.Unlock()
 	st, err := s.standing(r.Context(), req.Account, acct, devicePub)
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	if st == removedKey {
+		// A KEY THE ROSTER REVOKED gets no session, and is told so WITH THE
+		// CHAIN. Revocation reaches a device by its reading the roster and
+		// finding itself absent, and the wipe that follows must not happen on
+		// the relay's word -- a relay that could say "you were removed" and be
+		// believed could wipe any device. So the chain comes along, for the
+		// client to verify with the keys it holds. Not an oracle: only the
+		// holder of this private key got past the signature above.
+		chain, err := s.DB.Roster(r.Context(), req.Account, 0)
+		if err != nil {
+			s.fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		s.okStatus(w, http.StatusForbidden, revokedResponse{
+			Error:  "this device was removed from the account",
+			Roster: rosterResponse{Chain: base64.StdEncoding.EncodeToString(chain)},
+		})
 		return
 	}
 
@@ -264,7 +276,6 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	s.auth.sessions[sessionKey(encoded)] = sessionRecord{
 		account: req.Account, device: devicePub, expires: now.Add(sessionTTL),
 		limited: st == strangerKey,
-		removed: st == removedKey,
 	}
 	s.auth.mu.Unlock()
 

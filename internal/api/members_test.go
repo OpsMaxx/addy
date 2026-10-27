@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -141,8 +142,9 @@ func TestAStrangersKeyReachesOnlyRecovery(t *testing.T) {
 	}
 }
 
-// A REVOKE ENDS THE DEVICE'S SESSIONS, AND LOGGING IN AGAIN GETS IT ONLY THE
-// ROSTER -- which is how it learns it was revoked and wipes itself.
+// A REVOKE ENDS THE DEVICE'S SESSIONS, AND ITS NEXT LOGIN IS REFUSED WITH THE
+// CHAIN ATTACHED -- which is how it learns it was revoked, and checks that for
+// itself before it wipes.
 func TestARevokedDeviceLosesItsSessionAndCannotLogIn(t *testing.T) {
 	srv, db := instance(t)
 	a := client.New(srv.URL, true)
@@ -171,18 +173,45 @@ func TestARevokedDeviceLosesItsSessionAndCannotLogIn(t *testing.T) {
 	if code, _ := status(t, b, http.MethodGet, "/v1/roster", nil); code != http.StatusOK {
 		t.Errorf("the revoked device cannot read the roster that tells it to wipe: %d", code)
 	}
-	// A fresh login is no way round it.
-	if err := b.Login(); err != nil {
-		t.Fatalf("a revoked device must still log in to learn it was revoked: %v", err)
+	// A fresh login is refused, 403, with a chain the device can verify under
+	// keys the relay never supplied -- and that chain really revokes it.
+	err = b.Login()
+	if err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("a revoked device logged in again: %v", err)
 	}
-	for _, path := range []string{"/v1/obj/servers?epoch=1", "/v1/obj/escrow?epoch=1"} {
-		if code, msg := status(t, b, http.MethodGet, path, nil); code != http.StatusUnauthorized ||
-			msg != "this device has been removed from its sync group" {
-			t.Errorf("GET %s after a fresh login = %d %q", path, code, msg)
+	var refused struct {
+		Error  string `json:"error"`
+		Roster struct {
+			Chain string `json:"chain"`
+		} `json:"roster"`
+	}
+	if err := json.Unmarshal([]byte(err.Error()[strings.Index(err.Error(), "{"):]), &refused); err != nil {
+		t.Fatalf("the refusal is not the agreed JSON: %v", err)
+	}
+	if refused.Error != "this device was removed from the account" {
+		t.Errorf("refusal error = %q", refused.Error)
+	}
+	chain, err := base64.StdEncoding.DecodeString(refused.Roster.Chain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := protocol.VerifyChain(chain, acct.Root.AccountID,
+		acct.Root.Sign.Public().(ed25519.PublicKey), acct.Epoch.Sign.Public().(ed25519.PublicKey), nil)
+	if err != nil {
+		t.Fatalf("the chain in the refusal does not verify: %v", err)
+	}
+	for _, d := range v.Devices {
+		if string(d.PubSign) == string(b.Device.Sign.Public().(ed25519.PublicKey)) {
+			t.Error("the chain in the refusal still lists the revoked device")
 		}
 	}
-	if code, _ := status(t, b, http.MethodGet, "/v1/roster", nil); code != http.StatusOK {
-		t.Errorf("after a fresh login the revoked device cannot read the roster: %d", code)
+
+	// A STRANGER IS NOT TOLD THAT: a key the chain never named gets the
+	// limited recovery session, never this 403.
+	stranger := client.New(srv.URL, true)
+	stranger.Account, stranger.Device = acct.Root.AccountID, mustDevice(t)
+	if err := stranger.Login(); err != nil {
+		t.Errorf("a stranger got the revoked device's answer: %v", err)
 	}
 	// The device that revoked it is untouched.
 	if _, err := a.GetObject("servers", 1); err != nil {

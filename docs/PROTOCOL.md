@@ -304,17 +304,24 @@ The server MUST reject a login whose `server_nonce` it did not issue, whose
 
 "Belongs to" is read off the stored chain: the server folds it into its device
 set without verifying signatures (it holds no epoch key), and accepts a roster
-append only from a device in that set. Two kinds of key off the roster still get
-a session, each reaching only what it cannot do without. A key the chain
-revoked reaches `GET /v1/roster` alone, because a revoked device learns it was
-revoked — and wipes itself — by reading the chain (§9.5). A key the chain has
-never named reaches `GET /v1/roster`, `GET /v1/obj/escrow` and a
-`POST /v1/roster` whose entry is an `add` of that same key signed by `RK_sign`,
-because a device recovering from the mnemonic mints fresh keys and must read
-the chain before it can add itself; the server can verify that one signature,
-holding `RK_sign`'s public half from registration, and once the add is stored
-the session is a member's. A `revoke` cuts every live session of the device it
-names down to the first of those.
+append only from a device in that set.
+
+A key the chain revoked is answered, once its signature verifies, `403` with
+`{"error":"this device was removed from the account","roster":{"chain":"<base64>"}}`
+— the `roster` object exactly as `GET /v1/roster` returns it. A revoked device
+learns of its revocation from the chain (§9.5), and must verify that chain with
+its own pinned keys before acting on it: a client that wiped on the server's
+word would hand the server the power to wipe any device.
+
+A key the chain has never named gets a session reaching only `GET /v1/roster`,
+`GET /v1/obj/escrow` and a `POST /v1/roster` whose entry is an `add` of that
+same key signed by `RK_sign`, because a device recovering from the mnemonic
+mints fresh keys and must read the chain before it can add itself. The server
+can verify that one signature, holding `RK_sign`'s public half from
+registration, and once the add is stored the session is a member's.
+
+A `revoke` cuts every live session of the device it names down to
+`GET /v1/roster`.
 
 ### 4.2 Request authorization — signed by `DK_sign`
 

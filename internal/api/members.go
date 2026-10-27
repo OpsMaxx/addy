@@ -24,8 +24,16 @@ import (
 // Now: a login is checked against the device set the stored chain names
 // (protocol.Members), an append is accepted only from a device in that set,
 // and a revoke ends what the revoked device's sessions can do on the spot. A
-// key off the roster reads it -- to learn it was revoked, or to recover -- and
-// a stranger's may add itself with the root key; that is all.
+// revoked key's login is refused with the chain attached; a never-seen key
+// reads the chain and may add itself with the root key, and that is all.
+
+// revokedResponse is the 403 a revoked key's login gets: the reason, and the
+// chain exactly as GET /v1/roster serves it, for the client to verify before
+// it believes the reason.
+type revokedResponse struct {
+	Error  string         `json:"error"`
+	Roster rosterResponse `json:"roster"`
+}
 
 type standing int
 
