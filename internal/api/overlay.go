@@ -12,7 +12,9 @@ import (
 // whole of that sentence. Authentication here is the same authentication as
 // everywhere else -- a session plus a signed request authorization -- so a
 // device that can ask is by construction a device the account owner added and
-// has not revoked.
+// has not revoked: login reads the roster, a key it does not name never gets
+// past recoveryRoute, and a revoke ends the device's sessions (members.go).
+// That sentence was here before any of it was true.
 //
 // That is the feature. Without it, joining a machine means copying a pre-auth
 // key out of one terminal into another, which is a credential travelling

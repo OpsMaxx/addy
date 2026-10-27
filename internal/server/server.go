@@ -614,6 +614,15 @@ func (s storeAdmin) SetUserBlocked(ctx context.Context, userID string, blocked b
 	return translate(s.db.SetUserBlocked(ctx, userID, blocked))
 }
 
+func (s storeAdmin) SetUserAdmitted(ctx context.Context, userID string, admitted bool) error {
+	return translate(s.db.SetUserAdmitted(ctx, userID, admitted))
+}
+
+func (s storeAdmin) UserAdmitted(ctx context.Context, userID string) (bool, error) {
+	ok, err := s.db.UserAdmitted(ctx, userID)
+	return ok, translate(err)
+}
+
 func (s storeAdmin) AccountsOf(ctx context.Context, userID string) ([]operator.AccountView, error) {
 	rows, err := s.db.AccountsOf(ctx, userID)
 	if err != nil {
@@ -638,6 +647,7 @@ func (s storeAdmin) Users(ctx context.Context) ([]operator.UserView, error) {
 			UsedBytes: u.UsedBytes,
 			QuotaByte: u.QuotaByte,
 			Blocked:   u.Blocked,
+			Admitted:  u.Admitted,
 		}
 		if !u.LastSeen.IsZero() {
 			v.LastSeen = u.LastSeen.UTC().Format(time.RFC3339)

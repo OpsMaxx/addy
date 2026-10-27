@@ -109,20 +109,46 @@ type Config struct {
 //
 // So it is a decision the operator makes, and `invite` is the default because
 // it is the one that surprises nobody: people can sign in and see their own
-// space, and an account still needs an invite the operator handed over.
+// space, and nobody gets storage until the operator has admitted them.
 type SignupPolicy string
 
 const (
-	// SignupOpen: anybody who can sign in gets an invite on request. Right for
-	// a relay run for a team whose provider is already the membership list —
-	// with Google Workspace `Internal`, "anybody at the provider" IS the team.
+	// SignupOpen: anybody who can sign in sets up their own first device.
+	// Right for a relay run for a team whose provider is already the
+	// membership list — with Google Workspace `Internal`, "anybody at the
+	// provider" IS the team.
 	SignupOpen SignupPolicy = "open"
-	// SignupInvite: people can sign in and see their space, and an invite has
-	// to come from the operator. The default.
+	// SignupInvite: anybody can sign in; somebody the operator has admitted
+	// from the People list sets up their own first device, and nobody else
+	// gets storage. The default.
 	SignupInvite SignupPolicy = "invite"
-	// SignupClosed: nobody but the operator signs in at all.
+	// SignupClosed: nobody but the operator signs in at all. Devices that
+	// already sync keep syncing — they hold the keys, and signing in to this
+	// page is not what makes them work.
 	SignupClosed SignupPolicy = "closed"
 )
+
+// mayMint is whether somebody signed in may mint their own first invite.
+//
+// THIS IS WHAT `invite` MEANS, and for a while nothing read it: everybody
+// signed in could mint, so on the default policy anybody with an account at
+// the identity provider — the docs' example is accounts.google.com — got
+// storage on somebody's private box. The goal that change had is kept: an
+// admitted person does not wait for an operator to press a button. What
+// changed is who counts as admitted.
+func (a *Auth) mayMint(ctx context.Context, admin Admin, who Signed) (bool, error) {
+	if who.Operator {
+		return true, nil
+	}
+	switch a.SignupInForce(ctx) {
+	case SignupOpen:
+		return true, nil
+	case SignupInvite:
+		return admin.UserAdmitted(ctx, who.UserID)
+	}
+	// Closed: a member's session from before the switch mints nothing.
+	return false, nil
+}
 
 // settingSignup is where an operator's choice is stored.
 //

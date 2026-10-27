@@ -20,10 +20,10 @@ import (
 // Device authentication.
 //
 // A device proves it holds a DK_sign whose public half is an un-revoked entry in
-// the account's own roster. The server does not verify the roster's signatures
-// -- it holds no key for that -- but it does not need to: the chain it serves is
-// the chain the client verified, and a device the client would refuse is a
-// device whose requests the client's own data is not sealed to.
+// the account's own roster. The server cannot verify the roster's signatures --
+// it holds no epoch key -- but it can read who the chain names, and it accepts
+// an append only from somebody the chain already names, so the set it reads is
+// one only the account's own devices wrote. See members.go.
 
 const (
 	challengeTTL  = 2 * time.Minute
@@ -54,6 +54,16 @@ type authState struct {
 	// exactly what it must not trust. The set is bounded by the session
 	// lifetime instead: entries are swept with their session.
 	spent map[string]spentRecord
+
+	// roster serialises "who is on this roster" with acting on the answer: a
+	// login reading the chain and storing its session, against an append
+	// changing the chain and ending the sessions it removed. Without it a
+	// revoke landing between a login's read and its store leaves the revoked
+	// device holding a full session nothing will ever end.
+	//
+	// ponytail: one lock for every account; per-account locks if logins and
+	// appends ever queue behind each other.
+	roster sync.Mutex
 }
 
 type spentRecord struct {
@@ -70,6 +80,18 @@ type sessionRecord struct {
 	account string
 	device  []byte
 	expires time.Time
+	// limited is a key the roster does not name, which is either a stranger or
+	// a device mid-recovery -- and the relay cannot tell them apart, because
+	// a recovering device has freshly minted keys and must read the roster
+	// before it can add itself. It reaches only recoveryRoute; an add naming
+	// it lifts the limit (members.go).
+	limited bool
+	// removed is a session whose device a revoke took off the roster while it
+	// was live. It reads the roster, which is how it learns to wipe itself, and
+	// nothing else. Marked rather than deleted, so its next request is told why
+	// instead of "unknown or expired session", which a client answers by
+	// logging in again.
+	removed bool
 }
 
 func newAuthState() *authState {
@@ -205,6 +227,44 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AND THE KEY HAS TO BE ON THE ROSTER, which nothing checked: any key that
+	// signed got a session, a revoked device's included, and that session could
+	// write objects, append to the roster and join the overlay. PROTOCOL.md
+	// says the server MUST reject a login whose account the key does not
+	// belong to.
+	//
+	// A key the roster never named still gets a LIMITED session, because of
+	// RECOVERY: a device restoring from the phrase mints fresh keys and must
+	// read the escrow and the roster before it can append the root-signed
+	// entry that adds it, and OpsMaxx 0.58 does exactly that with the session
+	// this hands out. It reaches only recoveryRoute (members.go).
+	s.auth.roster.Lock()
+	defer s.auth.roster.Unlock()
+	st, err := s.standing(r.Context(), req.Account, acct, devicePub)
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	if st == removedKey {
+		// A KEY THE ROSTER REVOKED gets no session, and is told so WITH THE
+		// CHAIN. Revocation reaches a device by its reading the roster and
+		// finding itself absent, and the wipe that follows must not happen on
+		// the relay's word -- a relay that could say "you were removed" and be
+		// believed could wipe any device. So the chain comes along, for the
+		// client to verify with the keys it holds. Not an oracle: only the
+		// holder of this private key got past the signature above.
+		chain, err := s.DB.Roster(r.Context(), req.Account, 0)
+		if err != nil {
+			s.fail(w, http.StatusInternalServerError, err)
+			return
+		}
+		s.okStatus(w, http.StatusForbidden, revokedResponse{
+			Error:  "this device was removed from the account",
+			Roster: rosterResponse{Chain: base64.StdEncoding.EncodeToString(chain)},
+		})
+		return
+	}
+
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
 		s.fail(w, http.StatusInternalServerError, err)
@@ -215,6 +275,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	s.auth.mu.Lock()
 	s.auth.sessions[sessionKey(encoded)] = sessionRecord{
 		account: req.Account, device: devicePub, expires: now.Add(sessionTTL),
+		limited: st == strangerKey,
 	}
 	s.auth.mu.Unlock()
 
@@ -256,6 +317,10 @@ func (s *Server) authed(next authedHandler) http.Handler {
 		s.auth.mu.Unlock()
 		if !live {
 			s.fail(w, http.StatusUnauthorized, errors.New("unknown or expired session"))
+			return
+		}
+		if err := sess.refusal(r); err != nil {
+			s.fail(w, http.StatusUnauthorized, err)
 			return
 		}
 

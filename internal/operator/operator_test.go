@@ -334,28 +334,23 @@ func TestAnUnauthenticatedCallerReachesNothingButMe(t *testing.T) {
 	}
 }
 
-func TestAnybodySignedInCanMintTheirOwnFirstInvite(t *testing.T) {
-	// SETTING UP YOUR OWN FIRST DEVICE NEEDS NOBODY'S PERMISSION.
+func TestThePolicyDecidesWhoMintsTheirOwnFirstInvite(t *testing.T) {
+	// ON `invite`, A STRANGER AT THE PROVIDER GETS NO STORAGE.
 	//
-	// This used to depend on the signup policy, and the test that lived here
-	// asserted it did. That was the wrong rule: it made a person ask an
-	// operator, whose only way to help was to press the same button on the
-	// same page for them. The gate protected nothing, because whoever could
-	// sign in was already somebody this relay had decided to admit.
-	//
-	// What still holds somebody to one device group is the store, which
-	// refuses a second invite to a person who already has one — enforced where
-	// it cannot be bypassed rather than by a page hiding a button.
-	//
-	// The policy still decides something, and it is the earlier question: who
-	// may sign in at all. That is settled at the callback, before any of this.
+	// For a while everybody signed in could mint, on every policy, which made
+	// the default `invite` behave exactly like `open`: anybody with an account
+	// at the identity provider got space on somebody's private box. The goal of
+	// that change survives -- somebody the operator has ADMITTED sets up their
+	// own first device without the operator pressing a button for them.
 	for _, c := range []struct {
-		policy SignupPolicy
-		user   int // what an ordinary user gets from POST /admin/v1/my/invite
-		op     int // what the operator gets
+		policy   SignupPolicy
+		admitted bool
+		user     int // what an ordinary user gets from POST /admin/v1/my/invite
+		op       int // what the operator gets
 	}{
-		{SignupOpen, http.StatusOK, http.StatusOK},
-		{SignupInvite, http.StatusOK, http.StatusOK},
+		{SignupOpen, false, http.StatusOK, http.StatusOK},
+		{SignupInvite, false, http.StatusForbidden, http.StatusOK},
+		{SignupInvite, true, http.StatusOK, http.StatusOK},
 	} {
 		store := newStore()
 		owner := newIDP(t, "the-owner", "owner@example.com")
@@ -388,7 +383,11 @@ func TestAnybodySignedInCanMintTheirOwnFirstInvite(t *testing.T) {
 		}
 
 		mux := http.NewServeMux()
-		opAuth.Routes(mux, stubAdmin{})
+		admin := &blockingAdmin{}
+		if c.admitted {
+			admin.admitted = map[string]bool{userAuth.sessions[key(userSid)].userID: true}
+		}
+		opAuth.Routes(mux, admin)
 
 		for _, who := range []struct {
 			name string
@@ -406,8 +405,8 @@ func TestAnybodySignedInCanMintTheirOwnFirstInvite(t *testing.T) {
 			}
 			mux.ServeHTTP(rec, req)
 			if rec.Code != who.want {
-				t.Fatalf("%s policy, %s asking for an invite: got %d want %d (%s)",
-					c.policy, who.name, rec.Code, who.want, rec.Body.String())
+				t.Fatalf("%s policy (admitted %v), %s asking for an invite: got %d want %d (%s)",
+					c.policy, c.admitted, who.name, rec.Code, who.want, rec.Body.String())
 			}
 		}
 	}
@@ -475,6 +474,8 @@ func (stubAdmin) Users(context.Context) ([]UserView, error)                 { re
 func (stubAdmin) SetQuota(context.Context, string, int64) error             { return nil }
 func (stubAdmin) DeleteAccount(context.Context, string) error               { return nil }
 func (stubAdmin) SetUserBlocked(context.Context, string, bool) error        { return nil }
+func (stubAdmin) SetUserAdmitted(context.Context, string, bool) error       { return nil }
+func (stubAdmin) UserAdmitted(context.Context, string) (bool, error)        { return false, nil }
 
 // The operator changes the sign-in policy from the console, and it takes
 // effect without a restart.

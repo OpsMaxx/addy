@@ -130,7 +130,7 @@ func (d *DB) UpsertUser(ctx context.Context, issuer, subject, email, name string
 func (d *DB) Users(ctx context.Context) ([]UserSummary, error) {
 	rows, err := d.read.QueryContext(ctx, `
 		SELECT u.user_id, u.email, u.name, u.created_at, u.last_seen,
-		       u.quota_bytes, u.blocked_at,
+		       u.quota_bytes, u.blocked_at, u.admitted_at IS NOT NULL,
 		       (SELECT count(*) FROM account_owners o WHERE o.user_id = u.user_id),
 		       coalesce((SELECT sum(length(b.body))
 		                   FROM objects b
@@ -149,7 +149,7 @@ func (d *DB) Users(ctx context.Context) ([]UserSummary, error) {
 		var created, seen int64
 		var blockedAt sql.NullInt64
 		if err := rows.Scan(&s.UserID, &s.Email, &s.Name, &created, &seen,
-			&s.QuotaByte, &blockedAt, &s.Accounts, &s.UsedBytes); err != nil {
+			&s.QuotaByte, &blockedAt, &s.Admitted, &s.Accounts, &s.UsedBytes); err != nil {
 			return nil, err
 		}
 		s.CreatedAt = time.UnixMilli(created)
@@ -178,6 +178,37 @@ type UserSummary struct {
 	UsedBytes int64
 	QuotaByte int64
 	Blocked   bool
+	Admitted  bool
+}
+
+// SetUserAdmitted records the operator letting a person have storage, or
+// taking that back. It changes nothing a person already has: it decides only
+// whether they may mint their own first invite on a relay whose policy is
+// `invite`.
+func (d *DB) SetUserAdmitted(ctx context.Context, userID string, admitted bool) error {
+	var at any
+	if admitted {
+		at = time.Now().UnixMilli()
+	}
+	res, err := d.write.ExecContext(ctx, `UPDATE users SET admitted_at = ? WHERE user_id = ?`, at, userID)
+	if err != nil {
+		return fmt.Errorf("store: admitting %s: %w", userID, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNoUser
+	}
+	return nil
+}
+
+// UserAdmitted reports whether the operator has admitted a person.
+func (d *DB) UserAdmitted(ctx context.Context, userID string) (bool, error) {
+	var admitted bool
+	err := d.read.QueryRowContext(ctx,
+		`SELECT admitted_at IS NOT NULL FROM users WHERE user_id = ?`, userID).Scan(&admitted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNoUser
+	}
+	return admitted, err
 }
 
 // SetUserBlocked switches a person off, or back on.

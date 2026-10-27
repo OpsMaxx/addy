@@ -268,6 +268,15 @@ var migrations = []string{
 	// still the right thing for handing one to somebody who has not signed in
 	// — the account then belongs to nobody until it does.
 	`ALTER TABLE invites ADD COLUMN minted_for TEXT REFERENCES users(user_id)`,
+
+	// Whether the operator has let this person have storage.
+	//
+	// The `invite` sign-in policy promises that somebody with an account at the
+	// identity provider does not get space here without the operator's say-so,
+	// and nothing recorded a say-so: everybody signed in could mint their own
+	// first invite, which made `invite` the same as `open`. NULL is "not yet",
+	// which is every person who existed before this column did.
+	`ALTER TABLE users ADD COLUMN admitted_at INTEGER`,
 }
 
 func (d *DB) migrate(ctx context.Context) error {

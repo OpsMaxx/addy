@@ -91,9 +91,10 @@ async function loadMine() {
 /**
  * The lead card, painted from the number of sync groups this person has.
  *
- * A member may always mint their own first-device invite; the operator may
- * mint one for anybody. The SERVER enforces both — this is an affordance, not
- * a boundary.
+ * A member may mint their own invite where signup is open, or where it is
+ * `invite` and the operator has admitted them; the operator always may. The
+ * SERVER enforces that and says which in `me.mayMint` — this is an affordance,
+ * not a boundary.
  *
  * IT IS PAINTED, NOT BUILT ONCE. The count changes under an open page in both
  * directions: deleting your only group takes it to zero, and the invite you
@@ -108,7 +109,7 @@ async function loadMine() {
  * stylesheet, and console_contract_test.go fails the build if that stops
  * being true.
  */
-function paintLead(groups) {
+function paintLead(groups, me) {
   // WHAT AN INVITE DOES DEPENDS ON WHETHER YOU ALREADY HAVE A DEVICE, and
   // saying only one of the two is how somebody ends up with two sets of
   // devices that cannot see each other.
@@ -125,7 +126,15 @@ function paintLead(groups) {
     ? 'An invite sets up your first device on this relay and creates the sync group it syncs into. Make one here — it needs nobody else — and paste it into OpsMaxx together with this relay’s address.'
     : 'A second device joins by pairing with one you already have — no invite, and nothing to ask anybody for. This relay cannot do the joining part for you, because that is signed with a key it does not have. It can give you the one thing the new machine has no way of knowing.'
 
-  $('mint-mine-row').hidden = !first
+  // Not admitted: the button would be refused, so it is hidden and the
+  // sentence says who to ask.
+  const mayMint = me.mayMint === true
+  if (first && !mayMint) {
+    $('invite-blurb').textContent =
+      'This relay gives storage to the people its operator admits, and you have not been admitted yet. Ask whoever runs it; once they have, this page lets you set up your first device without them.'
+  }
+
+  $('mint-mine-row').hidden = !first || !mayMint
   $('operator-made').hidden = !first
   $('pair-steps').hidden = first
   // An invite still on screen once a device has registered is spent: it
@@ -206,7 +215,7 @@ async function main() {
   })
   if (groups === null) return
   wireLead()
-  paintLead(groups)
+  paintLead(groups, me)
 
   // COMING BACK TO THE TAB IS WHEN THE ANSWER CHANGES. The invite is pasted
   // into OpsMaxx, in another window; the device registers there; and the
@@ -221,7 +230,7 @@ async function main() {
     // page this would be painting into.
     if (inFlight || !$('mine')) return
     inFlight = loadMine()
-      .then(paintLead)
+      .then((n) => paintLead(n, me))
       .catch(fail)
       .finally(() => {
         inFlight = null

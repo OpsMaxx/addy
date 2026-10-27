@@ -94,10 +94,10 @@ type appendRosterRequest struct {
 
 // appendRoster stores one entry.
 //
-// The server checks contiguity and nothing else. It cannot verify the signature
-// -- it holds no key -- and does not pretend to: the client verifies the chain
-// from genesis before trusting any of it, so an appended forgery is caught
-// there rather than here.
+// The server checks that the entry extends the chain and that the caller is on
+// it (members.go). It cannot verify an epoch key's signature -- it holds none
+// -- and does not pretend to: the client verifies the chain from genesis before
+// trusting any of it, so an appended forgery is caught there rather than here.
 func (s *Server) appendRoster(w http.ResponseWriter, r *http.Request, a authedRequest) {
 	var req appendRosterRequest
 	if err := unmarshal(a.Body, &req); err != nil {
@@ -109,8 +109,8 @@ func (s *Server) appendRoster(w http.ResponseWriter, r *http.Request, a authedRe
 		s.fail(w, http.StatusBadRequest, errors.New("an entry is required"))
 		return
 	}
-	if err := s.DB.AppendRoster(r.Context(), a.Account, req.Seq, entry); err != nil {
-		s.fail(w, statusFor(err), err)
+	if status, err := s.appendEntry(r.Context(), a, req.Seq, entry); err != nil {
+		s.fail(w, status, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
