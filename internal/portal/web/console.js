@@ -85,8 +85,10 @@ async function loadMine() {
 /**
  * The invite button.
  *
- * A member may mint their own invite only where signup is open; the operator
- * always may. The SERVER enforces that — this is an affordance, not a boundary.
+ * A member may mint their own invite where signup is open, or where it is
+ * `invite` and the operator has admitted them; the operator always may. The
+ * SERVER enforces that and says which in `me.mayMint` — this is an affordance,
+ * not a boundary.
  * Which is exactly why the failure mode mattered: the button used to be hidden
  * by CSS and left unwired, so the one time the CSS did not hold, a member got a
  * button that did nothing at all.
@@ -96,7 +98,7 @@ async function loadMine() {
  * answer — it offers a capability that no action of the reader's can unlock,
  * and leaves them hunting for the setting that would.
  */
-function wireMyInvite(groups) {
+function wireMyInvite(groups, me) {
   // WHAT AN INVITE DOES DEPENDS ON WHETHER YOU ALREADY HAVE A DEVICE, and
   // saying only one of the two is how somebody ends up with two sets of
   // devices that cannot see each other.
@@ -120,6 +122,16 @@ function wireMyInvite(groups) {
   if (!first) {
     $('mint-mine-row').remove()
     showHandoff()
+    return
+  }
+
+  // Not admitted: the button would be refused, so it is removed and the
+  // sentence says who to ask.
+  if (!me.mayMint) {
+    $('invite-blurb').textContent =
+      'This relay gives storage to the people its operator admits, and you have not been admitted yet. Ask whoever runs it; once they have, this page lets you set up your first device without them.'
+    $('mint-mine-row').remove()
+    $('pair-steps').remove()
     return
   }
 
@@ -198,7 +210,7 @@ async function main() {
     return null
   })
   if (groups === null) return
-  wireMyInvite(groups)
+  wireMyInvite(groups, me)
 }
 
 void main()

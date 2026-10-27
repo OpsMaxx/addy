@@ -118,18 +118,21 @@ tr '\0' ' ' < /proc/$(pgrep -x addy)/cmdline | grep -c oidc   # expect 0
 ### Who else may sign in
 
 A relay is multi-user. Anybody who signs in through your provider gets their
-own space: their accounts, their device counts, their bytes — and nothing of
-anybody else's. `ADDY_SIGNUP` decides whether they can also help themselves to
-an invite:
+own space: their sync groups, their roster entries, their bytes — and nothing
+of anybody else's. `ADDY_SIGNUP` decides who may sign in, and who gets storage:
+somebody who gets storage mints the invite for their own first device, without
+you.
 
 | Value | What it means |
 |---|---|
-| `invite` | **The default.** They can sign in and see their own space; an invite still comes from you. |
-| `open` | Anybody who signs in can mint their own invite. Right when the provider already *is* your membership list — Google Workspace `Internal`, or an Okta group. |
-| `closed` | Nobody but you. Others can sign in and will find nothing they can do. |
+| `invite` | **The default.** Anybody can sign in, but only people you admit from the console's People list get storage. Nobody with an account at your provider gets space here without your say-so. |
+| `open` | Anybody who signs in gets storage. Right when the provider already *is* your membership list — Google Workspace `Internal`, or an Okta group. |
+| `closed` | Nobody but you signs in. Existing members can no longer sign in, but their devices keep syncing: they hold the keys, and this page is not what makes them work. |
 
-The policy is enforced on the server, not by hiding a button, so `open` is the
-only setting under which that request succeeds however it is made.
+The console's *Who may sign in* card shows and changes the policy without a
+restart; a value set there overrides `ADDY_SIGNUP`. Admitting somebody is the
+**Admit** button beside them in the People list, shown while the policy is
+`invite`. The policy is enforced on the server, not by hiding a button.
 
 Whoever claimed the relay is its operator and is not subject to this — §5.
 
@@ -155,8 +158,9 @@ You should land on the console showing your email. Then:
 
 - **Create an invite** — hand it to whoever is setting up their first device.
   It is shown once, works once, and expires in 24 hours by default.
-- **Accounts** — an identifier, a device count, bytes used, a quota. That is
-  everything this relay knows.
+- **Accounts** — an identifier, a count of roster entries, bytes used, a
+  quota. That is everything this relay knows. Roster entries are not devices:
+  a removed device and a key rotation each add one.
 
 To check the claim did what it should: sign in from a different Google account
 and confirm it is refused with *"this relay already has an operator, and it is
@@ -217,5 +221,6 @@ of running a relay you control.
 
 So a device is added from OpsMaxx: an invite for the first one, pairing with
 seven compared emoji for every one after, and the twelve-word recovery phrase
-if they are all gone. The console can tell you an account has four devices. It
-cannot tell you what they are called, and it cannot make it three.
+if they are all gone. The console can tell you a sync group's roster has four
+entries. It cannot tell you which devices they name or what they are called,
+and it cannot remove one.

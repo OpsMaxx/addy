@@ -141,7 +141,7 @@ func serve(args []string) error {
 	fs.StringVar(&cfg.HeadscaleUser, "headscale-user", "addy",
 		"headscale user that owns the joined nodes. One per account keeps the node list readable")
 	fs.StringVar(&cfg.Signup, "signup", "",
-		"Who may sign in besides the operator: `open` gives anybody who signs in an invite on request (right when the provider already IS your membership list, such as Google Workspace Internal), `invite` lets them sign in and see their own space while an invite still comes from you, `closed` admits nobody but you. Default: invite")
+		"Who may sign in besides the operator: `open` gives anybody who signs in an invite on request (right when the provider already IS your membership list, such as Google Workspace Internal), `invite` lets anybody sign in but gives storage only to people you admit from the console's People list, who then set up their own devices, `closed` lets nobody but you sign in (existing members' devices keep syncing). Default: invite")
 	fs.StringVar(&cfg.OIDCIssuer, "oidc-issuer", "",
 		"Identity provider for the operator portal, as an OIDC issuer URL — https://accounts.google.com for Google. Without all three -oidc flags no portal is served and you administer this relay with the addy command")
 	fs.StringVar(&cfg.OIDCClientID, "oidc-client-id", "",

@@ -80,6 +80,9 @@ type Admin interface {
 	SetQuota(ctx context.Context, accountID string, bytes int64) error
 	DeleteAccount(ctx context.Context, accountID string) error
 	SetUserBlocked(ctx context.Context, userID string, blocked bool) error
+	// The operator's say-so under the `invite` policy. See mayMint.
+	SetUserAdmitted(ctx context.Context, userID string, admitted bool) error
+	UserAdmitted(ctx context.Context, userID string) (bool, error)
 }
 
 // UserView is a person as the console lists them.
@@ -97,6 +100,7 @@ type UserView struct {
 	UsedBytes int64  `json:"usedBytes"`
 	QuotaByte int64  `json:"quotaBytes"`
 	Blocked   bool   `json:"blocked"`
+	Admitted  bool   `json:"admitted"`
 	Operator  bool   `json:"operator,omitempty"`
 }
 
@@ -223,6 +227,15 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		// deliberately the only structured thing served without a session.
 		if ok {
 			body["signup"] = string(a.SignupInForce(r.Context()))
+			// Whether THIS person may mint their own first invite, so the page
+			// can say "ask the operator" instead of offering a button the
+			// server will refuse. An affordance; mayMint is the boundary.
+			may, err := a.mayMint(r.Context(), admin, who)
+			if err != nil {
+				fault(w, err)
+				return
+			}
+			body["mayMint"] = may
 		}
 		writeJSON(w, body)
 	})
@@ -239,21 +252,22 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	}))
 
 	mux.Handle("POST /admin/v1/my/invite", a.signedIn(func(w http.ResponseWriter, r *http.Request, who Signed) {
-		// A SIGNED-IN PERSON MINTS THEIR OWN FIRST DEVICE'S INVITE, ALWAYS.
+		// AN ADMITTED PERSON MINTS THEIR OWN FIRST DEVICE'S INVITE, without an
+		// operator pressing a button for them -- and the policy decides who is
+		// admitted (mayMint). Enforced here, not by the page hiding a button.
 		//
-		// This used to depend on the signup policy, which made setting up your
-		// own first device a thing you had to ask an operator for — and the
-		// operator's answer was to press the same button on the same page. The
-		// gate protected nothing: whoever could sign in was already somebody
-		// this relay had decided to admit.
-		//
-		// What still holds it to one device-group per person is the store,
-		// which refuses a second invite to somebody who already has one. That
-		// is the rule worth enforcing, and it is enforced where it cannot be
-		// bypassed.
-		//
-		// Whether somebody may sign in AT ALL is the policy's job now, and it
-		// is decided before any of this, at the callback.
+		// What holds an admitted person to one sync group is the store, which
+		// refuses a second invite to somebody who already has one.
+		may, err := a.mayMint(r.Context(), admin, who)
+		if err != nil {
+			fault(w, err)
+			return
+		}
+		if !may {
+			problem(w, http.StatusForbidden, errors.New(
+				"this relay's operator has not admitted you yet; ask them to, and this page will then let you set up your first device"))
+			return
+		}
 		token, err := admin.NewInviteFor(r.Context(), who.UserID, 24*time.Hour)
 		if err != nil {
 			fault(w, err)
@@ -360,6 +374,17 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 		// is what makes that sentence true.
 		if blocked {
 			a.EndAllFor(r.PathValue("id"))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	// Admitting a person under the `invite` policy: from then on they set up
+	// their own first device without the operator. 204, like blocking.
+	mux.Handle("POST /admin/v1/users/{id}/admitted", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
+		admitted := r.URL.Query().Get("admitted") != "false"
+		if err := admin.SetUserAdmitted(r.Context(), r.PathValue("id"), admitted); err != nil {
+			fault(w, err)
+			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))

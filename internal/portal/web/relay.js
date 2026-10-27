@@ -21,14 +21,10 @@ async function loadUsers(me) {
   $('no-users').hidden = users.length > 1
   $('stat-people').textContent = String(users.length)
 
-  // Everybody here sets up their own devices; this line says who is on the
-  // list, not what they may do once they are. The card below changes it —
-  // pointing at a command-line flag was wrong even before it moved, because
-  // the person reading it is already holding the control.
-  $('signup-note').textContent =
-    me.signup === 'closed'
-      ? 'Nobody new can sign in. The people below already have accounts and are unaffected.'
-      : 'Anybody who can sign in to your identity provider can get an account here. Each of them sets up their own devices without needing you.'
+  // What the policy in force means for the people listed. The card below
+  // changes it — pointing at a command-line flag was wrong even before it
+  // moved, because the person reading it is already holding the control.
+  $('signup-note').textContent = POLICY_NOTE[me.signup] || POLICY_NOTE.invite
 
   for (const u of users) {
     const tr = document.createElement('tr')
@@ -53,10 +49,36 @@ async function loadUsers(me) {
       chip.textContent = 'blocked'
       person.append(chip)
     }
+    if (u.admitted && me.signup === 'invite') {
+      const chip = document.createElement('span')
+      chip.className = 'chip'
+      chip.textContent = 'admitted'
+      person.append(chip)
+    }
     tr.append(person, cell(String(u.accounts)), cell(bytes(u.usedBytes)), cell(when(u.lastSeen)))
 
     const actions = document.createElement('td')
     actions.className = 'right'
+    // ADMISSION ONLY MEANS SOMETHING ON `invite`, so the button exists only
+    // there: on `open` everybody may already, and on `closed` nobody may.
+    if (!isMe && me.signup === 'invite') {
+      const admit = document.createElement('button')
+      admit.className = 'button ghost small'
+      admit.textContent = u.admitted ? 'Withdraw admission' : 'Admit'
+      admit.setAttribute('aria-label', `${admit.textContent} ${u.email || u.name || u.userId}`)
+      admit.addEventListener('click', async () => {
+        try {
+          clearProblem()
+          await api(`/admin/v1/users/${encodeURIComponent(u.userId)}/admitted?admitted=${!u.admitted}`, {
+            method: 'POST'
+          })
+          await refreshAll(me)
+        } catch (err) {
+          fail(err)
+        }
+      })
+      actions.append(admit)
+    }
     if (!isMe) {
       const block = document.createElement('button')
       block.className = 'button ghost small' + (u.blocked ? '' : ' danger')
@@ -184,25 +206,37 @@ async function refreshAll(me) {
   await loadAccounts(me)
 }
 
+// One line per policy, said the same way on both cards. `closed` says what
+// happens to people already here, because "only me" reads as if it deleted
+// them: it stops them signing in to this page, and their devices, which hold
+// the keys, keep syncing.
+const POLICY_STATE = {
+  open: 'Anybody who can sign in to your identity provider gets storage here and sets up their own devices.',
+  invite: 'Anybody can sign in, but only people you admit in the People list get storage; after that they set up their own devices without you.',
+  closed: 'Only you can sign in. Existing members can no longer sign in here, but their devices keep syncing.'
+}
+const POLICY_NOTE = {
+  open: 'Anybody who can sign in to your identity provider gets storage here. Each of them sets up their own devices without needing you.',
+  invite: 'People get storage once you admit them below. After that they set up their own devices without needing you.',
+  closed: 'Nobody but you can sign in. The people below can no longer sign in here, but their devices keep syncing.'
+}
+
 /**
- * Who may sign in, changed from here rather than from the unit file.
+ * Who may sign in, and who gets storage, changed from here rather than from
+ * the unit file.
  *
- * THIS IS THE ONLY THING IT DECIDES NOW. Everybody signed in sets up their own
- * devices and mints their own invite; that needs nothing from the operator, so
- * the policy governs the earlier question — who gets through the door at all.
+ * Three buttons for the three policies the server knows. There used to be two,
+ * and the default — `invite` — was neither: the page showed it as "Anybody at
+ * your provider", and could not select it back once changed.
  *
- * The buttons say which one is in force rather than being a pair of equal
- * options, because an operator arriving here needs to read the current state
- * before they need to change it.
+ * The buttons say which one is in force rather than being equal options,
+ * because an operator arriving here needs to read the current state before
+ * they need to change it.
  */
-async function wireSignup() {
+async function wireSignup(me) {
   const paint = (s) => {
-    const open = s.signup !== 'closed'
-    $('signup-state').textContent = open
-      ? 'Anybody who can sign in to your identity provider can get an account on this relay.'
-      : 'Nobody new can sign in. People who already have an account here are unaffected.'
-    $('signup-open').disabled = open
-    $('signup-closed').disabled = !open
+    $('signup-state').textContent = POLICY_STATE[s.signup] || ''
+    for (const p of ['open', 'invite', 'closed']) $('signup-' + p).disabled = s.signup === p
     $('signup-source').textContent =
       s.signupSource === 'console'
         ? 'Set from this page. It overrides ADDY_SIGNUP in the environment, which says ' + s.envDefault + '.'
@@ -214,6 +248,9 @@ async function wireSignup() {
     try {
       paint(await api('/admin/v1/settings?signup=' + encodeURIComponent(signup), { method: 'POST' }))
       $('signup-saved').textContent = 'Saved.'
+      // The People card's note and its Admit buttons depend on this.
+      me.signup = signup
+      await loadUsers(me)
     } catch (err) {
       $('signup-saved').textContent = ''
       fail(err)
@@ -221,6 +258,7 @@ async function wireSignup() {
   }
 
   $('signup-open').addEventListener('click', () => set('open'))
+  $('signup-invite').addEventListener('click', () => set('invite'))
   $('signup-closed').addEventListener('click', () => set('closed'))
   paint(await api('/admin/v1/settings'))
 }
@@ -250,7 +288,7 @@ async function main() {
   })
 
   await refreshAll(me).catch(fail)
-  await wireSignup().catch(fail)
+  await wireSignup(me).catch(fail)
 }
 
 void main()

@@ -107,3 +107,30 @@ func newAccountID(t *testing.T) string {
 	}
 	return hex.EncodeToString(raw)
 }
+
+// Admission is recorded per person, starts as "not yet" for everybody, and is
+// what the console lists.
+func TestAdmissionIsRecordedAndListed(t *testing.T) {
+	d := openTemp(t)
+	ctx := context.Background()
+	u, err := d.UpsertUser(ctx, "https://issuer.example", "subject-1", "person@example.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.UserAdmitted(ctx, u.UserID); err != nil || ok {
+		t.Fatalf("a new person is admitted=%v (%v), want false", ok, err)
+	}
+	if err := d.SetUserAdmitted(ctx, u.UserID, true); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := d.UserAdmitted(ctx, u.UserID); !ok {
+		t.Fatal("admitting did not stick")
+	}
+	list, err := d.Users(ctx)
+	if err != nil || len(list) != 1 || !list[0].Admitted {
+		t.Fatalf("the console's list does not show the admission: %+v %v", list, err)
+	}
+	if err := d.SetUserAdmitted(ctx, "nobody", true); !errors.Is(err, ErrNoUser) {
+		t.Errorf("admitting nobody answered %v, want ErrNoUser", err)
+	}
+}

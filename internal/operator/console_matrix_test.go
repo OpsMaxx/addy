@@ -206,14 +206,12 @@ func TestEveryConsoleRouteForEveryCallerOnEveryPolicy(t *testing.T) {
 		},
 		{
 			method: http.MethodPost, path: "/admin/v1/my/invite",
-			anon: http.StatusUnauthorized, member: http.StatusOK,
+			anon: http.StatusUnauthorized, member: http.StatusForbidden,
 			memberIfOpen: http.StatusOK, operator: http.StatusOK,
-			why: "SETTING UP YOUR OWN FIRST DEVICE NEEDS NOBODY'S PERMISSION. This used " +
-				"to depend on the signup policy, which meant asking an operator to press " +
-				"the same button on the same page; the gate protected nothing, because " +
-				"whoever could sign in was already somebody this relay had admitted. " +
-				"What still holds a person to one device group is the store, and the " +
-				"policy now decides only who may sign in at all",
+			why: "STORAGE NEEDS THE OPERATOR'S SAY-SO UNLESS THE RELAY IS OPEN. On `invite` " +
+				"this member has not been admitted, so a stranger at the identity provider " +
+				"gets nothing; on `closed` nobody but the operator mints. An admitted " +
+				"member minting without the operator is TestThePolicyDecidesWhoMintsTheirOwnFirstInvite",
 		},
 		{
 			method: http.MethodGet, path: "/admin/v1/users",
@@ -226,6 +224,12 @@ func TestEveryConsoleRouteForEveryCallerOnEveryPolicy(t *testing.T) {
 			anon: http.StatusUnauthorized, member: http.StatusForbidden, operator: http.StatusNoContent,
 			why: "blocking is the operator's, and it answers 204 because there is nothing " +
 				"to return — the page refetches the list",
+		},
+		{
+			method: http.MethodPost, path: "/admin/v1/users/{id}/admitted?admitted=true",
+			anon: http.StatusUnauthorized, member: http.StatusForbidden, operator: http.StatusNoContent,
+			why: "admitting somebody is the operator's say-so; a member who could admit " +
+				"would be a member who could give anybody storage",
 		},
 		{
 			method: http.MethodPost, path: "/admin/v1/invite",
@@ -511,8 +515,9 @@ func TestTheOperatorCannotBlockThemselvesOutOfTheirOwnRelay(t *testing.T) {
 // like stubAdmin.
 type blockingAdmin struct {
 	stubAdmin
-	blocked map[string]bool
-	owned   map[string][]AccountView
+	blocked  map[string]bool
+	admitted map[string]bool
+	owned    map[string][]AccountView
 	// What actually reached the store. A route that refuses with the right
 	// status while still deleting would pass a status assertion.
 	deleted []string
@@ -529,6 +534,18 @@ func (b *blockingAdmin) SetUserBlocked(_ context.Context, userID string, blocked
 	}
 	b.blocked[userID] = blocked
 	return nil
+}
+
+func (b *blockingAdmin) SetUserAdmitted(_ context.Context, userID string, admitted bool) error {
+	if b.admitted == nil {
+		b.admitted = map[string]bool{}
+	}
+	b.admitted[userID] = admitted
+	return nil
+}
+
+func (b *blockingAdmin) UserAdmitted(_ context.Context, userID string) (bool, error) {
+	return b.admitted[userID], nil
 }
 
 func (b *blockingAdmin) AccountsOf(_ context.Context, userID string) ([]AccountView, error) {
