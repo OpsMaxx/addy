@@ -581,6 +581,18 @@ func (a *Auth) Session(sid string) (Signed, bool) {
 // directly — still will not end a live session, because nothing tells this
 // process it happened. That is the same shape as every other out-of-band edit
 // to a running relay, and the remedy is the same, a restart.
+// EndAllMembers ends every console session that is not the operator's, for
+// the switch to `closed`.
+func (a *Auth) EndAllMembers() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for k, s := range a.sessions {
+		if !s.operator {
+			delete(a.sessions, k)
+		}
+	}
+}
+
 func (a *Auth) EndAllFor(userID string) int {
 	if userID == "" {
 		return 0

@@ -270,8 +270,13 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 			return
 		}
 		if !may {
-			problem(w, http.StatusForbidden, errors.New(
-				"this relay's operator has not admitted you yet; ask them to, and this page will then let you set up your first device"))
+			// Two different refusals, and only one of them is worth asking the
+			// operator about.
+			why := "this relay's operator has not admitted you yet; ask them to, and this page will then let you set up your first device"
+			if a.SignupInForce(r.Context()) == SignupClosed {
+				why = "this relay is not giving storage to anybody new; only its operator can set up a sync group here"
+			}
+			problem(w, http.StatusForbidden, errors.New(why))
 			return
 		}
 		token, err := admin.NewInviteFor(r.Context(), who.UserID, 24*time.Hour)
@@ -293,16 +298,21 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	// somebody locks themselves out of their own relay with one click. Those
 	// stay in the environment file, where changing them is a deliberate act on
 	// the box.
-	mux.Handle("GET /admin/v1/settings", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
-		inForce := a.SignupInForce(r.Context())
-		stored, _, err := a.store.InstanceValue(r.Context(), settingSignup)
-		writeJSON(w, map[string]any{
+	// The same body from both, so the page paints one shape: the POST used to
+	// answer without envDefault and the page printed "which says undefined".
+	settings := func(ctx context.Context) map[string]any {
+		inForce := a.SignupInForce(ctx)
+		stored, _, err := a.store.InstanceValue(ctx, settingSignup)
+		return map[string]any{
 			"signup": string(inForce),
 			// Where the value came from, because an operator looking at a
 			// setting needs to know whether the unit file still decides it.
 			"signupSource": map[bool]string{true: "console", false: "environment"}[err == nil && SignupPolicy(stored).valid()],
 			"envDefault":   string(a.cfg.Signup),
-		})
+		}
+	}
+	mux.Handle("GET /admin/v1/settings", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
+		writeJSON(w, settings(r.Context()))
 	}))
 
 	mux.Handle("POST /admin/v1/settings", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
@@ -311,7 +321,12 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 			problem(w, http.StatusBadRequest, err)
 			return
 		}
-		writeJSON(w, map[string]any{"signup": string(p), "signupSource": "console"})
+		// "Only me" means only me now, not in eight hours: a member's open
+		// console would otherwise outlive the switch by a whole session.
+		if p == SignupClosed {
+			a.EndAllMembers()
+		}
+		writeJSON(w, settings(r.Context()))
 	}))
 
 	// DELETING YOUR OWN SYNC GROUP, because the alternative is asking an
@@ -387,7 +402,17 @@ func (a *Auth) Routes(mux *http.ServeMux, admin Admin) {
 	// Admitting a person under the `invite` policy: from then on they set up
 	// their own first device without the operator. 204, like blocking.
 	mux.Handle("POST /admin/v1/users/{id}/admitted", a.operator(func(w http.ResponseWriter, r *http.Request, _ Signed) {
-		admitted := r.URL.Query().Get("admitted") != "false"
+		// Exactly one of two words. Anything else used to mean "admit", so a
+		// typo in a withdrawal granted storage.
+		var admitted bool
+		switch r.URL.Query().Get("admitted") {
+		case "true":
+			admitted = true
+		case "false":
+		default:
+			problem(w, http.StatusBadRequest, errors.New("admitted is true or false"))
+			return
+		}
 		if err := admin.SetUserAdmitted(r.Context(), r.PathValue("id"), admitted); err != nil {
 			fault(w, err)
 			return

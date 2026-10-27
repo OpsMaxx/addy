@@ -185,19 +185,30 @@ type UserSummary struct {
 // taking that back. It changes nothing a person already has: it decides only
 // whether they may mint their own first invite on a relay whose policy is
 // `invite`.
+//
+// WITHDRAWING IT CANCELS THE INVITES THEY ALREADY MINTED. An invite is a valid
+// token for 24 hours whoever holds it, so without this a person told "no" kept
+// the storage they had asked for a minute earlier.
 func (d *DB) SetUserAdmitted(ctx context.Context, userID string, admitted bool) error {
 	var at any
 	if admitted {
 		at = time.Now().UnixMilli()
 	}
-	res, err := d.write.ExecContext(ctx, `UPDATE users SET admitted_at = ? WHERE user_id = ?`, at, userID)
-	if err != nil {
-		return fmt.Errorf("store: admitting %s: %w", userID, err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNoUser
-	}
-	return nil
+	return d.Tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE users SET admitted_at = ? WHERE user_id = ?`, at, userID)
+		if err != nil {
+			return fmt.Errorf("store: admitting %s: %w", userID, err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNoUser
+		}
+		if admitted {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx,
+			`DELETE FROM invites WHERE minted_for = ? AND spent_by IS NULL`, userID)
+		return err
+	})
 }
 
 // UserAdmitted reports whether the operator has admitted a person.

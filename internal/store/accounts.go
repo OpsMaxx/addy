@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -27,7 +28,52 @@ var (
 	ErrInviteUnknown = errors.New("store: no such invite")
 	ErrInviteSpent   = errors.New("store: that invite has already been spent")
 	ErrInviteExpired = errors.New("store: that invite has expired")
+	// ErrEpochKeyMismatch is a second, different epoch-1 key for an account
+	// that already has one. The first was checked against the genesis
+	// signature, so the second cannot also be right.
+	ErrEpochKeyMismatch = errors.New("store: this account already has a different epoch 1 key")
 )
+
+// SignKeys returns the account's root and epoch-1 signing keys. epoch1 is nil
+// when no device has supplied it.
+//
+// FOR THE RELAY'S OWN CHECKS. The same rule as RootSignPub: a client must not
+// verify a chain against anything this returns.
+func (d *DB) SignKeys(ctx context.Context, accountID string) (root, epoch1 []byte, err error) {
+	err = d.read.QueryRowContext(ctx,
+		`SELECT root_sign_pub, epoch1_sign_pub FROM accounts WHERE account_id = ?`, accountID).Scan(&root, &epoch1)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, ErrNoAccount
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("store: reading account %s: %w", accountID, err)
+	}
+	return root, epoch1, nil
+}
+
+// SetEpoch1SignPub records the account's epoch-1 signing key, once. The
+// caller has already checked it against the stored chain; setting the same
+// key again is a no-op, and a different one is ErrEpochKeyMismatch.
+func (d *DB) SetEpoch1SignPub(ctx context.Context, accountID string, pub []byte) error {
+	return d.Tx(ctx, func(tx *sql.Tx) error {
+		var have []byte
+		err := tx.QueryRowContext(ctx,
+			`SELECT epoch1_sign_pub FROM accounts WHERE account_id = ?`, accountID).Scan(&have)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrNoAccount
+		case err != nil:
+			return err
+		case have != nil && !bytes.Equal(have, pub):
+			return ErrEpochKeyMismatch
+		case have != nil:
+			return nil
+		}
+		_, err = tx.ExecContext(ctx,
+			`UPDATE accounts SET epoch1_sign_pub = ? WHERE account_id = ?`, pub, accountID)
+		return err
+	})
+}
 
 // CreateAccount registers a client-asserted identity.
 //

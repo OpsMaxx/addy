@@ -280,6 +280,14 @@ var migrations = []string{
 	// first invite, which made `invite` the same as `open`. NULL is "not yet",
 	// which is every person who existed before this column did.
 	`ALTER TABLE users ADD COLUMN admitted_at INTEGER`,
+
+	// The account's epoch-1 signing key, which the genesis entry is signed
+	// with and no chain contains. Without it the relay cannot verify a single
+	// roster signature, so a member could append an entry with a junk
+	// signature that every client then refuses for ever. NULL for accounts
+	// whose devices have not supplied it yet; the relay checks those by
+	// structure alone, as it always did.
+	`ALTER TABLE accounts ADD COLUMN epoch1_sign_pub BLOB`,
 }
 
 func (d *DB) migrate(ctx context.Context) error {

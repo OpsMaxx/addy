@@ -84,6 +84,10 @@ func (s *Server) Handler() http.Handler {
 	// cannot be replayed as the DELETE the server would rather have had.
 	mux.Handle("GET /v1/roster", s.authed(s.getRoster))
 	mux.Handle("POST /v1/roster", s.authed(s.appendRoster))
+	// The account's epoch-1 signing key, for accounts registered before the
+	// relay asked for it: with it, every append is verified as a client
+	// would. Self-validating against the stored chain (members.go).
+	mux.Handle("POST /v1/roster/epoch1", s.authed(s.setEpoch1))
 	mux.Handle("GET /v1/obj/{name}", s.authed(s.getObject))
 	mux.Handle("PUT /v1/obj/{name}", s.authed(s.putObject))
 	mux.Handle("DELETE /v1/obj/{name}", s.authed(s.deleteObject))
@@ -195,6 +199,7 @@ func statusFor(err error) int {
 	switch {
 	case errors.Is(err, store.ErrETagMismatch), errors.Is(err, store.ErrObjectExists),
 		errors.Is(err, store.ErrSeqTaken), errors.Is(err, store.ErrSeqGap),
+		errors.Is(err, store.ErrEpochKeyMismatch),
 		errors.Is(err, store.ErrAccountExists),
 		// One email is one sync group. A well-formed registration refused by
 		// the state of the world, which is what 409 is for — and the same code

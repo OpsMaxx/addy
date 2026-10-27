@@ -533,6 +533,23 @@ section {
   color: var(--accent-ink);
 }
 
+/* The pressed member of a toggle group -- the setting in force. Marked by
+   aria-pressed rather than :disabled, so it stays focusable and readable. */
+.button.ghost[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.policy-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-block: 0.35rem;
+}
+
 .button.small {
   padding: 0.3rem 0.7rem;
   font-size: var(--fs-fine);

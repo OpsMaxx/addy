@@ -129,6 +129,12 @@ func (s *Server) changes(w http.ResponseWriter, r *http.Request, a authedRequest
 
 	select {
 	case note := <-ch:
+		// Re-checked on waking, as signal does: a revoke can land while
+		// this poll is parked.
+		if err := s.auth.stillServing(a); err != nil {
+			s.fail(w, http.StatusUnauthorized, err)
+			return
+		}
 		if note.Actor != self {
 			batch = append(batch, note)
 		}

@@ -115,13 +115,24 @@
 
         <div class="card">
           <div class="card-head"><h2>Who may sign in</h2></div>
-          <p class="fine" id="signup-state"></p>
-          <p class="flush">
-            <button id="signup-open" class="button ghost small">Anybody at your provider</button>
-            <button id="signup-invite" class="button ghost small">People I admit</button>
-            <button id="signup-closed" class="button ghost small">Only me</button>
-            <span id="signup-saved" class="fine"></span>
-          </p>
+          <!-- A toggle group: the policy in force is the pressed button. Never
+               disabled, so it stays reachable by keyboard and focus stays on
+               the button that was pressed. -->
+          <div role="group" aria-label="Who may sign in">
+            <p class="flush policy-option">
+              <button id="signup-open" class="button ghost small" aria-pressed="false" aria-describedby="signup-open-desc">Anybody at your provider</button>
+              <span id="signup-open-desc" class="fine"></span>
+            </p>
+            <p class="flush policy-option">
+              <button id="signup-invite" class="button ghost small" aria-pressed="false" aria-describedby="signup-invite-desc">People I admit</button>
+              <span id="signup-invite-desc" class="fine"></span>
+            </p>
+            <p class="flush policy-option">
+              <button id="signup-closed" class="button ghost small" aria-pressed="false" aria-describedby="signup-closed-desc">Only me</button>
+              <span id="signup-closed-desc" class="fine"></span>
+            </p>
+          </div>
+          <p class="fine" id="signup-saved" role="status"></p>
           <p class="fine">
             This decides who may sign in and who gets storage. Somebody who gets
             storage sets up their own devices without you. It takes effect at

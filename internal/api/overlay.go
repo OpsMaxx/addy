@@ -16,6 +16,13 @@ import (
 // past recoveryRoute, and a revoke ends the device's sessions (members.go).
 // That sentence was here before any of it was true.
 //
+// WHAT IT DOES NOT DO: take a revoked device OFF the overlay. Revoking ends its
+// addy sessions, so it cannot mint another key, but the headscale node it
+// already joined as is not ephemeral and stays registered -- addy has no call
+// that deletes or expires a node. Until it does, the operator removes it by
+// hand: the node carries the ACL tag `tag:addy-<first bytes of the device
+// key>` (internal/overlay), which is how to find it in `headscale nodes list`.
+//
 // That is the feature. Without it, joining a machine means copying a pre-auth
 // key out of one terminal into another, which is a credential travelling
 // through a clipboard, and it is why "one button" was the requirement rather

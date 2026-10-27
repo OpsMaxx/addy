@@ -105,6 +105,8 @@ func (c *Client) Register(label, invite string) (*protocol.Account, error) {
 		"invite":        invite,
 		"genesis":       base64.StdEncoding.EncodeToString(wire),
 		"escrow":        base64.StdEncoding.EncodeToString(a.Escrow),
+		// So the relay can verify every roster entry this account appends.
+		"epoch1_sign_pub": hex.EncodeToString(a.Epoch.Sign.Public().(ed25519.PublicKey)),
 	})
 
 	resp, err := c.HTTP.Post(c.BaseURL+"/v1/account", "application/json", bytes.NewReader(body))
