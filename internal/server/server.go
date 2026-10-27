@@ -338,6 +338,8 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}()
 
+	go sweepConflicts(ctx, db, log, time.Hour, conflictMaxAge)
+
 	log.Info("addy starting",
 		"version", cfg.Version,
 		"build", cfg.BuildSha,
@@ -355,6 +357,36 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 	return err
+}
+
+// conflictMaxAge is how long an unresolved conflict copy is kept.
+//
+// Long, because one that ages out is a choice somebody never got to make: the
+// copy is the only place those bytes exist. Not forever, because nothing else
+// reclaims them -- DESIGN.md's "conflict copies need their own GC" -- and an
+// unbounded table charged to quota is an availability problem.
+const conflictMaxAge = 90 * 24 * time.Hour
+
+// sweepConflicts runs store.SweepConflicts once now and then every `every`
+// until ctx ends. It had no caller at all, so the backstop it describes did
+// not exist. What it drops is logged as a warning: each one is work lost.
+func sweepConflicts(ctx context.Context, db *store.DB, log *slog.Logger, every, age time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		if n, err := db.SweepConflicts(ctx, age); err != nil {
+			if ctx.Err() == nil {
+				log.Warn("sweeping expired conflict copies failed", "err", err)
+			}
+		} else if n > 0 {
+			log.Warn("conflict copies expired unresolved and were deleted", "dropped", n, "age", age)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // check refuses a configuration that would start and then do nothing useful.

@@ -172,3 +172,30 @@ func TestConflictsComeBackOldestFirst(t *testing.T) {
 		}
 	}
 }
+
+// Only the named account's copies, and only those from before the epoch.
+func TestDroppingConflictsBeforeAnEpochKeepsTheCurrentOnes(t *testing.T) {
+	db, ctx := conflictFixture(t)
+	for _, epoch := range []uint64{1, 1, 2, 3} {
+		if err := db.KeepConflict(ctx, testAccount, Conflict{
+			Name: "vault", Epoch: epoch, Counter: 2,
+			Body: []byte("x"), Device: bytes.Repeat([]byte{1}, 32),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := db.DropConflictsBefore(ctx, testAccount, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Errorf("dropped %d, want 3", n)
+	}
+	left, err := db.Conflicts(ctx, testAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 || left[0].Epoch != 3 {
+		t.Fatalf("left %+v, want only the epoch-3 copy", left)
+	}
+}

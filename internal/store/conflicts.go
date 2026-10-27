@@ -118,3 +118,27 @@ func (d *DB) SweepConflicts(ctx context.Context, age time.Duration) (int64, erro
 	})
 	return n, err
 }
+
+// DropConflictsBefore deletes an account's conflict copies sealed under any
+// epoch older than `epoch`, and says how many went.
+//
+// Called when a transition entry is accepted. An epoch advances because a
+// device was removed, and every copy sealed before that is one the removed
+// device may have written, or could still read: one click on "Replace it
+// with the other copy" re-sealed it under the new key and pushed it to every
+// device the user kept. Current clients no longer offer these at all; this is
+// what stops them sitting on the relay, charged to the quota, for a client
+// that would.
+func (d *DB) DropConflictsBefore(ctx context.Context, accountID string, epoch uint64) (int64, error) {
+	var n int64
+	err := d.Tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM conflicts WHERE account_id = ? AND epoch < ?`, accountID, epoch)
+		if err != nil {
+			return fmt.Errorf("store: dropping conflicts from before epoch %d: %w", epoch, err)
+		}
+		n, _ = res.RowsAffected()
+		return nil
+	})
+	return n, err
+}

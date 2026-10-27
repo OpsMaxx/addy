@@ -1,12 +1,14 @@
 package api_test
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/opsmaxx/addy/internal/client"
+	"github.com/opsmaxx/addy/internal/protocol"
 )
 
 // The loser of a race keeps its bytes, and a person gets to choose.
@@ -182,4 +184,86 @@ func itoa(n int64) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// AN EPOCH ADVANCING TAKES THE OLDER EPOCHS' CONFLICT COPIES WITH IT.
+//
+// A re-key is what removing a device does, and a copy sealed before it may be
+// the removed device's own. Kept, it was one click on "Replace it with the
+// other copy" from being re-sealed under the new key and pushed everywhere. A
+// copy kept AFTER the transition -- including by an OpsMaxx 0.59.0 client,
+// which posts exactly what it always did -- is still accepted and offered.
+func TestATransitionDropsConflictCopiesFromOlderEpochs(t *testing.T) {
+	srv, db := instance(t)
+	c := client.New(srv.URL, true)
+	acct, err := c.Register("one", invite(t, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Login(); err != nil {
+		t.Fatal(err)
+	}
+	keep := func(epoch int, body string) {
+		t.Helper()
+		resp := post(t, c, "/v1/obj/servers/conflict", map[string]any{
+			"epoch": epoch, "counter": 2, "body": base64.StdEncoding.EncodeToString([]byte(body)),
+		})
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("keeping a conflict at epoch %d answered %s", epoch, resp.Status)
+		}
+	}
+	listed := func() []uint64 {
+		t.Helper()
+		resp, err := c.RawRequest(http.MethodGet, "/v1/conflicts", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out struct {
+			Conflicts []struct {
+				Epoch uint64 `json:"epoch"`
+			} `json:"conflicts"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		var epochs []uint64
+		for _, x := range out.Conflicts {
+			epochs = append(epochs, x.Epoch)
+		}
+		return epochs
+	}
+
+	keep(1, "sealed before the re-key")
+
+	wire, err := acct.Genesis.Wire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPub := acct.Root.Sign.Public().(ed25519.PublicKey)
+	verified, err := protocol.VerifyChain(wire, acct.Root.AccountID, rootPub,
+		acct.Epoch.Sign.Public().(ed25519.PublicKey), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rot, err := protocol.PrepareRotation(protocol.Hygiene, acct.Root.AccountID, verified,
+		acct.Genesis, acct.Epoch.Sign, rootPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := listed(); len(got) != 1 {
+		t.Fatalf("before the transition %v conflicts were listed, want one", got)
+	}
+	if err := c.AppendRoster(rot.Entry); err != nil {
+		t.Fatalf("appending the transition: %v", err)
+	}
+	if got := listed(); len(got) != 0 {
+		t.Fatalf("epoch-1 conflict copies survived the move to epoch 2: %v", got)
+	}
+
+	keep(2, "sealed after it")
+	if got := listed(); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("after the transition the listing is %v, want [2]", got)
+	}
 }
