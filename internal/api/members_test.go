@@ -1,8 +1,11 @@
 package api_test
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -271,5 +274,53 @@ func TestARosterAppendMustExtendTheChain(t *testing.T) {
 	bad := nextEntry(t, acct, acct.Genesis, protocol.OpRevoke, protocol.SignerAK, mustDevice(t))
 	if err := a.AppendRoster(bad); err == nil || !strings.Contains(err.Error(), "400") {
 		t.Errorf("a revoke of an absent device was stored: %v", err)
+	}
+}
+
+// A LOGIN BOUND TO ANOTHER TLS KEY IS REFUSED. The signature verifies -- it is
+// the device's own -- but over a key this relay does not serve, which is what
+// a login relayed through somebody else's TLS termination looks like.
+func TestALoginBoundToAnotherTLSKeyIsRefused(t *testing.T) {
+	srv, db := instance(t)
+	a := client.New(srv.URL, true)
+	acct, err := a.Register("quiet-otter-41", invite(t, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := func(spki []byte) int {
+		pub := acct.Device.Sign.Public().(ed25519.PublicKey)
+		body, _ := json.Marshal(map[string]string{"account": acct.Root.AccountID.String(), "device": hex.EncodeToString(pub)})
+		resp, err := srv.Client().Post(srv.URL+"/v1/auth/challenge", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ch struct{ Nonce string }
+		_ = json.NewDecoder(resp.Body).Decode(&ch)
+		resp.Body.Close()
+		nonce, _ := protocol.Nonce()
+		server, _ := hex.DecodeString(ch.Nonce)
+		l := protocol.Login{AccountID: acct.Root.AccountID, DeviceNonce: nonce, ServerNonce: server, ServerSPKI: spki, TS: 1}
+		sig, err := protocol.Sign(acct.Device.Sign, l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = json.Marshal(map[string]any{
+			"account": acct.Root.AccountID.String(), "device": hex.EncodeToString(pub),
+			"device_nonce": hex.EncodeToString(nonce), "server_nonce": ch.Nonce,
+			"server_spki": hex.EncodeToString(spki), "ts": 1, "signature": hex.EncodeToString(sig),
+		})
+		resp, err = srv.Client().Post(srv.URL+"/v1/auth/login", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := login(bytes.Repeat([]byte{0xaa}, 32)); got != http.StatusUnauthorized {
+		t.Errorf("a login bound to another TLS key = %d, want 401", got)
+	}
+	own := sha256.Sum256(srv.Certificate().RawSubjectPublicKeyInfo)
+	if got := login(own[:]); got != http.StatusOK {
+		t.Errorf("a login bound to this relay's key = %d, want 200", got)
 	}
 }

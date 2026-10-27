@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,9 @@ func instanceWithAPI(t *testing.T) (*httptest.Server, *store.DB, *api.Server) {
 	a.PollWait = 250 * time.Millisecond
 	srv := httptest.NewTLSServer(a.Handler())
 	t.Cleanup(srv.Close)
+	// The test server's own key is the one key a login may bind.
+	own := sha256.Sum256(srv.Certificate().RawSubjectPublicKeyInfo)
+	a.ServesKey = func(_ string, spki []byte) bool { return bytes.Equal(spki, own[:]) }
 	return srv, db, a
 }
 

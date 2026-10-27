@@ -298,6 +298,16 @@ login signature captured from one instance is replayable against another
 instance that presents the same account — the signature says "I am this device",
 not "I am this device *talking to you*".
 
+The server MUST check `server_spki` against its own key: it accepts a login only
+if `server_spki` is SHA-256 of the DER SubjectPublicKeyInfo of a certificate it
+has itself presented, in a handshake, for the TLS server name the login arrived
+on, and answers anything else exactly as it answers a bad signature. Without
+that comparison the binding binds nothing — somebody terminating TLS for the
+hostname with any certificate the device accepts could forward the login and
+keep the session. It follows that **a TLS-terminating proxy in front of addy is
+unsupported**: the device would sign the proxy's key, and the relay refuses it.
+Pass TLS through (SNI routing, TCP proxying) instead.
+
 The server MUST reject a login whose `server_nonce` it did not issue, whose
 `account_id` is not the one the presented `DK_sign` belongs to, or which reuses a
 `server_nonce` already spent.

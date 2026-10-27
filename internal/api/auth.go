@@ -235,6 +235,19 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AND THE TLS KEY IT BINDS HAS TO BE THIS RELAY'S. The signature covers
+	// the SPKI the device saw; nothing compared that with the key this relay
+	// serves, so somebody terminating TLS for the hostname -- with any
+	// certificate the device accepts -- could forward a login and keep the
+	// session, and the binding PROTOCOL.md §4.1 describes bound nothing.
+	// Before the roster is read, so a relayed login learns nothing from it;
+	// and in the same words as a bad signature, which is what it is: a
+	// signature over the wrong channel.
+	if r.TLS == nil || s.ServesKey == nil || !s.ServesKey(r.TLS.ServerName, login.ServerSPKI) {
+		s.fail(w, http.StatusUnauthorized, errors.New("that signature does not verify"))
+		return
+	}
+
 	// AND THE KEY HAS TO BE ON THE ROSTER, which nothing checked: any key that
 	// signed got a session, a revoked device's included, and that session could
 	// write objects, append to the roster and join the overlay. PROTOCOL.md

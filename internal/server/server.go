@@ -180,6 +180,12 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
+	// Every key handed out in a handshake is recorded, so a login can check
+	// that the TLS key its signature binds is this relay's (api.ServesKey).
+	// Before the Door is built: it clones tlsConf, function and all.
+	served := &frontdoor.ServedKeys{}
+	served.Wrap(tlsConf)
+
 	if cfg.Dev {
 		if err := frontdoor.DevCertificate(ctx, magic, export, cfg.DataDir, routes.Hosts()); err != nil {
 			return err
@@ -198,6 +204,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// one. Turning the portal off does not turn addy off.
 	mux := http.NewServeMux()
 	apiServer := api.New(db, log)
+	apiServer.ServesKey = served.Serves
 
 	// The relay. Off unless an operator gave it a public address, and skipped
 	// entirely when they pointed devices at somebody else's -- an embedded

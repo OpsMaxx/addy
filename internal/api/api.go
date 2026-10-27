@@ -46,6 +46,13 @@ type Server struct {
 	// one, since configuring it is the deliberate act.
 	TurnExternal string
 
+	// ServesKey reports whether spki (SHA-256 of a SubjectPublicKeyInfo) is a
+	// key this relay presents for a TLS server name -- the check that makes a
+	// login's channel binding mean something. Nil refuses every login: a relay
+	// that cannot say which key it serves cannot tell its own logins from
+	// relayed ones. frontdoor.ServedKeys in production.
+	ServesKey func(serverName string, spki []byte) bool
+
 	auth   *authState
 	hub    *hub
 	notify *notifier
