@@ -217,6 +217,7 @@ type pendingLogin struct {
 type session struct {
 	subject  string
 	email    string
+	name     string
 	userID   string
 	operator bool
 	expires  time.Time
@@ -226,6 +227,7 @@ type session struct {
 type Signed struct {
 	UserID   string
 	Email    string
+	Name     string
 	Operator bool
 }
 
@@ -460,6 +462,7 @@ func (a *Auth) Complete(ctx context.Context, state, code string) (string, error)
 	a.sessions[key(sid)] = session{
 		subject:  who.Subject,
 		email:    who.Email,
+		name:     who.Name,
 		userID:   user.UserID,
 		operator: isOperator,
 		expires:  a.now().Add(sessionTTL),
@@ -530,7 +533,7 @@ func (a *Auth) Session(sid string) (Signed, bool) {
 	if !ok || a.now().After(s.expires) {
 		return Signed{}, false
 	}
-	return Signed{UserID: s.userID, Email: s.email, Operator: s.operator}, true
+	return Signed{UserID: s.userID, Email: s.email, Name: s.name, Operator: s.operator}, true
 }
 
 // EndAllFor signs out every live session belonging to one person, and returns

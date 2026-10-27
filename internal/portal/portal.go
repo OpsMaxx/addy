@@ -24,6 +24,13 @@ var assets embed.FS
 type Config struct {
 	Version  string
 	BuildSha string
+	// ConsoleOnly serves the two consoles and what they load, and nothing
+	// else: no front page, no paste reader. It is what a relay runs with
+	// sign-in configured and -ui off, because the sign-in flow lands on
+	// /console and a 404 there is a sign-in that appears not to work. The
+	// rest of the portal stays behind -ui, which is the operator's choice
+	// about what a stranger finds at this address.
+	ConsoleOnly bool
 }
 
 // Handler returns the portal's routes.
@@ -38,6 +45,44 @@ func Handler(cfg Config) (http.Handler, error) {
 
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", files))
 	mux.Handle("GET /robots.txt", files)
+
+	// TWO CONSOLES, TWO ADDRESSES.
+	//
+	// /console is YOURS: your sync group, your devices, your invite. It is
+	// what signing in gets you, whoever you are, and it administers nothing —
+	// an ordinary member of somebody else's relay landing on a page headed
+	// "admin" was reading a true statement about the URL and a false one about
+	// the page.
+	//
+	// /console/relay is the relay's: everybody's sync groups, quotas,
+	// deletions. Its only entrance is a link on /console shown to operators,
+	// so reaching it is a thing somebody did rather than a thing that happened
+	// to them. The page still checks for itself — the affordance is not the
+	// boundary, and the boundary is in internal/operator, on every route it
+	// calls.
+	//
+	// Both exist whether or not a provider is configured, and say which of the
+	// two it is, rather than 404ing at somebody who typed the address they
+	// were told to use. Their API routes live in internal/operator and are
+	// mounted on the API's mux; this serves only the HTML.
+	mux.Handle("GET /console", page(sub, "console.html"))
+	mux.Handle("GET /console/relay", page(sub, "relay.html"))
+
+	// /admin was the single stacked console and is in every version of the
+	// docs and in whatever people bookmarked. It keeps working, one hop away,
+	// rather than becoming a 404 that reads as "the console is gone".
+	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/console", http.StatusFound)
+	})
+
+	if cfg.ConsoleOnly {
+		// The masthead on both consoles links to "/". With no front page,
+		// that link goes to the console rather than to a 404.
+		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/console", http.StatusFound)
+		})
+		return headers(mux), nil
+	}
 
 	// Deliberately the only structured thing the portal serves without
 	// authentication, and deliberately boring: a version string and a build
@@ -62,35 +107,6 @@ func Handler(cfg Config) (http.Handler, error) {
 	// one step from a GET that consumes it. The page asks, over the API, after
 	// it loads.
 	mux.Handle("GET /p/{id}", page(sub, "paste.html"))
-
-	// TWO CONSOLES, TWO ADDRESSES.
-	//
-	// /console is YOURS: your accounts, your devices, your invite. It is what
-	// signing in gets you, whoever you are, and it administers nothing — an
-	// ordinary member of somebody else's relay landing on a page headed
-	// "admin" was reading a true statement about the URL and a false one about
-	// the page.
-	//
-	// /console/relay is the relay's: everybody's accounts, quotas, deletions.
-	// Its only entrance is a link on /console shown to operators, so reaching
-	// it is a thing somebody did rather than a thing that happened to them.
-	// The page still checks for itself — the affordance is not the boundary,
-	// and the boundary is in internal/operator, on every route it calls.
-	//
-	// Both exist whether or not a provider is configured, and say which of the
-	// two it is, rather than 404ing at somebody who typed the address they
-	// were told to use. Their API routes live in internal/operator and are
-	// mounted on the API's mux; this serves only the HTML.
-	mux.Handle("GET /console", page(sub, "console.html"))
-	mux.Handle("GET /console/relay", page(sub, "relay.html"))
-
-	// /admin was the single stacked console and is in every version of the
-	// docs, in the sign-in flow's redirect, and in whatever people bookmarked.
-	// It keeps working, one hop away, rather than becoming a 404 that reads as
-	// "the console is gone".
-	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/console", http.StatusFound)
-	})
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

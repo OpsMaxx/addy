@@ -248,19 +248,11 @@ func Run(ctx context.Context, cfg Config) error {
 
 	mux.Handle("/v1/", apiServer.Handler())
 
-	var pages http.Handler = http.NotFoundHandler()
-	if cfg.UI {
-		p, err := portal.Handler(portal.Config{Version: cfg.Version, BuildSha: cfg.BuildSha})
-		if err != nil {
-			return fmt.Errorf("building the portal: %w", err)
-		}
-		pages = portal.NoServiceWorker(p)
-	}
-
 	// The operator portal. Mounted on the SAME mux as /v1/ rather than inside
 	// `pages`, because it must work whether or not -ui is on: an operator who
 	// wants to mint an invite from a browser should not have to also serve the
-	// public portal to do it.
+	// public portal to do it. The console PAGES those routes answer are served
+	// with them for the same reason — see pagesFor.
 	operatorBase := "https://" + cfg.Domain
 	if cfg.Dev {
 		// LOCALHOST, NOT THE BIND ADDRESS. `-dev` binds 127.0.0.1 by default,
@@ -292,6 +284,10 @@ func Run(ctx context.Context, cfg Config) error {
 		// missing rather than left pressing a button that does nothing.
 		log.Info("operator portal: not configured; administer with the addy command over SSH",
 			"needs", "-oidc-issuer, -oidc-client-id and -oidc-client-secret")
+	}
+	pages, err := pagesFor(cfg, opCfg.Enabled())
+	if err != nil {
+		return err
 	}
 	// /v1/meta is served WHETHER OR NOT THE PORTAL IS ON, and that is a fix
 	// rather than a preference.
@@ -616,4 +612,25 @@ func accountViews(rows []store.AccountSummary) []operator.AccountView {
 		out = append(out, v)
 	}
 	return out
+}
+
+// pagesFor is what answers every path nothing else claims.
+//
+// THE CONSOLE PAGES GO WHEREVER THE SIGN-IN GOES. The operator routes are
+// mounted whenever a provider is configured, and the sign-in they finish
+// lands on /console — which used to live only in the -ui portal, so on a
+// default install a successful sign-in ended on a 404, and the comment above
+// promising the console worked without -ui was true of its API and of
+// nothing a browser could open. With sign-in on and -ui off, the consoles and
+// their assets are served and the rest of the portal (front page, paste
+// reader) is not.
+func pagesFor(cfg Config, signIn bool) (http.Handler, error) {
+	if !cfg.UI && !signIn {
+		return http.NotFoundHandler(), nil
+	}
+	p, err := portal.Handler(portal.Config{Version: cfg.Version, BuildSha: cfg.BuildSha, ConsoleOnly: !cfg.UI})
+	if err != nil {
+		return nil, fmt.Errorf("building the portal: %w", err)
+	}
+	return portal.NoServiceWorker(p), nil
 }
