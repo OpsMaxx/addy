@@ -185,6 +185,21 @@ func (s *Server) appendEntry(ctx context.Context, a authedRequest, seq uint64, w
 		return statusFor(err), err
 	}
 	s.auth.settle(a.Account, e)
+
+	// AN EPOCH ADVANCED, so every conflict copy sealed under an older one goes
+	// (store.DropConflictsBefore says why). After the append, not before: a
+	// transition that was refused moved nothing. Not a failure of the append
+	// either -- the entry is stored and the device needs to hear so; the
+	// clients ignore old-epoch copies and the age sweep reclaims them anyway.
+	if e.Op == protocol.OpEpoch {
+		if n, err := s.DB.DropConflictsBefore(ctx, a.Account, e.Epoch); err != nil {
+			s.Log.Warn("could not drop conflict copies from before an epoch transition",
+				"account", a.Account, "epoch", e.Epoch, "err", err)
+		} else if n > 0 {
+			s.Log.Info("dropped conflict copies from before an epoch transition",
+				"account", a.Account, "epoch", e.Epoch, "dropped", n)
+		}
+	}
 	return 0, nil
 }
 
