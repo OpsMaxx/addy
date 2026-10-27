@@ -11,10 +11,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/opsmaxx/addy/internal/protocol"
 	"github.com/opsmaxx/addy/internal/store"
 )
 
@@ -84,7 +86,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/roster", s.authed(s.appendRoster))
 	mux.Handle("GET /v1/obj/{name}", s.authed(s.getObject))
 	mux.Handle("PUT /v1/obj/{name}", s.authed(s.putObject))
+	mux.Handle("DELETE /v1/obj/{name}", s.authed(s.deleteObject))
 	mux.Handle("GET /v1/signal", s.authed(s.signal))
+	mux.Handle("POST /v1/signal", s.authed(s.publishSignal))
 	mux.Handle("GET /v1/changes", s.authed(s.changes))
 
 	// Pastes. Creating needs an account; READING deliberately does not -- the
@@ -121,7 +125,32 @@ func (s *Server) Handler() http.Handler {
 	// the authentication that gets it here is what makes that true.
 	mux.Handle("POST /v1/overlay/join", s.authed(s.overlayJoin))
 
-	return mux
+	return s.protocolGate(mux)
+}
+
+// ProtocolHeader carries the wire contract a client speaks.
+const ProtocolHeader = "X-Addy-Protocol"
+
+// protocolGate refuses a client that names a protocol this server does not
+// speak, before any handler reads a byte it might misparse.
+//
+// 426 rather than 400: nothing is wrong with the request as HTTP, and the
+// remedy is to upgrade one end, which is what the status says. An ABSENT header
+// is let through, because OpsMaxx 0.58 shipped without sending one and
+// refusing it would turn a relay upgrade into every existing device going
+// dark. Present and different is the case this exists for: a sidecar whose
+// vendored protocol has moved on, failing loudly here instead of sealing
+// something the other end cannot open.
+func (s *Server) protocolGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.Header.Get(ProtocolHeader); v != "" && v != protocol.ProtocolVersion {
+			s.fail(w, http.StatusUpgradeRequired, fmt.Errorf(
+				"this relay speaks %s and the client speaks %s; update OpsMaxx or the relay",
+				protocol.ProtocolVersion, v))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type errorBody struct {
@@ -173,7 +202,7 @@ func statusFor(err error) int {
 		// same answer: this group cannot be created.
 		errors.Is(err, store.ErrHasAccount):
 		return http.StatusConflict
-	case errors.Is(err, store.ErrNoAccount):
+	case errors.Is(err, store.ErrNoAccount), errors.Is(err, store.ErrNoObject):
 		return http.StatusNotFound
 	case errors.Is(err, store.ErrMailboxFull):
 		// 507 like a quota, because it is the same shape of problem from the

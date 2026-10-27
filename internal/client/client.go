@@ -246,6 +246,7 @@ func (c *Client) do(method, path string, payload any) (*http.Response, error) {
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("X-Addy-Nonce", hex.EncodeToString(nonce))
 	req.Header.Set("X-Addy-Signature", hex.EncodeToString(sig))
+	req.Header.Set("X-Addy-Protocol", protocol.ProtocolVersion)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -314,7 +315,7 @@ func (c *Client) AppendRoster(e protocol.Entry) error {
 // for somebody else's mailbox, which is what stops one device draining
 // another's.
 func (c *Client) SendFrame(toDevice []byte, frame []byte) error {
-	resp, err := c.do(http.MethodGet, "/v1/signal?to="+hex.EncodeToString(toDevice), map[string]string{
+	resp, err := c.do(http.MethodPost, "/v1/signal?to="+hex.EncodeToString(toDevice), map[string]string{
 		"frame": base64.StdEncoding.EncodeToString(frame),
 	})
 	if err != nil {

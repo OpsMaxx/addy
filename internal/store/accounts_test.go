@@ -219,3 +219,71 @@ func TestDeletingAnAccountCascades(t *testing.T) {
 		t.Errorf("after deleting the account: %d roster entries and %d objects remain", entries, objects)
 	}
 }
+
+// A REGISTRATION LANDS WHOLE OR NOT AT ALL.
+//
+// The handler used to make three writes and spend the invite in the first, so
+// a failure in the third left an account with a roster but no escrow -- or,
+// failing in the second, none at all -- and an invite that could never be used
+// again. The failure is injected with a trigger on the escrow's table, which is
+// the last of the three writes and so the one that used to strand the most.
+func TestAFailedRegistrationLeavesTheInviteUnspent(t *testing.T) {
+	db, token := withInvite(t)
+	ctx := context.Background()
+	pub := bytes.Repeat([]byte{1}, 32)
+
+	if _, err := db.Write().ExecContext(ctx,
+		`CREATE TRIGGER refuse_escrow BEFORE INSERT ON objects
+		 BEGIN SELECT RAISE(ABORT, 'injected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RegisterAccount(ctx, testAccount, pub, token, []byte("genesis"), []byte("escrow")); err == nil {
+		t.Fatal("the registration succeeded with its escrow write refused")
+	}
+	if _, err := db.RootSignPub(ctx, testAccount); !errors.Is(err, ErrNoAccount) {
+		t.Fatalf("a failed registration left an account behind: %v", err)
+	}
+	if chain, err := db.Roster(ctx, testAccount, 0); err != nil || len(chain) != 0 {
+		t.Fatalf("a failed registration left a roster behind: %q, %v", chain, err)
+	}
+
+	// And the same invite still works once whatever failed is fixed.
+	if _, err := db.Write().ExecContext(ctx, `DROP TRIGGER refuse_escrow`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RegisterAccount(ctx, testAccount, pub, token, []byte("genesis"), []byte("escrow")); err != nil {
+		t.Fatalf("retrying with the same invite: %v", err)
+	}
+	if o, err := db.GetObject(ctx, testAccount, "escrow", 1); err != nil || string(o.Body) != "escrow" {
+		t.Fatalf("the escrow did not land: %v", err)
+	}
+}
+
+// DELETING IS WHAT GIVES QUOTA BACK, and it reaches only its own account.
+func TestDeletingAnObjectFreesItsQuota(t *testing.T) {
+	db, ctx := quotaFixture(t)
+	if err := db.SetQuota(ctx, testAccount, 4096); err != nil {
+		t.Fatal(err)
+	}
+	big := Object{Name: "transfer:x", Epoch: 1, Counter: 1, Body: bytes.Repeat([]byte{0}, 3000)}
+	if _, err := db.PutObject(ctx, testAccount, big, ""); err != nil {
+		t.Fatal(err)
+	}
+	next := Object{Name: "transfer:y", Epoch: 1, Counter: 1, Body: bytes.Repeat([]byte{0}, 3000)}
+	if _, err := db.PutObject(ctx, testAccount, next, ""); !errors.Is(err, ErrOverQuota) {
+		t.Fatalf("second write = %v, want ErrOverQuota", err)
+	}
+
+	if err := db.DeleteObject(ctx, "ffffffffffffffffffffffffffffffff", big.Name, nil); !errors.Is(err, ErrNoObject) {
+		t.Fatalf("another account deleted this one's object: %v", err)
+	}
+	if err := db.DeleteObject(ctx, testAccount, big.Name, nil); err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+	if err := db.DeleteObject(ctx, testAccount, big.Name, nil); !errors.Is(err, ErrNoObject) {
+		t.Fatalf("deleting it twice = %v, want ErrNoObject", err)
+	}
+	if _, err := db.PutObject(ctx, testAccount, next, ""); err != nil {
+		t.Fatalf("the quota was not freed: %v", err)
+	}
+}

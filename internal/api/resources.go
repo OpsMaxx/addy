@@ -50,26 +50,19 @@ func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-	if err := s.DB.CreateAccount(ctx, req.Account, rootPub, req.Invite); err != nil {
-		s.fail(w, statusFor(err), err)
-		return
-	}
-	if err := s.DB.AppendRoster(ctx, req.Account, 0, genesis); err != nil {
-		s.fail(w, statusFor(err), err)
-		return
-	}
+	// Decoded BEFORE anything is written, and the three writes are one
+	// transaction: a failure part-way used to leave a spent invite and an
+	// account no device could log in to. See store.RegisterAccount.
+	var escrow []byte
 	if req.Escrow != "" {
-		escrow, err := base64.StdEncoding.DecodeString(req.Escrow)
-		if err != nil {
+		if escrow, err = base64.StdEncoding.DecodeString(req.Escrow); err != nil {
 			s.fail(w, http.StatusBadRequest, errors.New("the escrow is not base64"))
 			return
 		}
-		if _, err := s.DB.PutObject(ctx, req.Account,
-			store.Object{Name: "escrow", Epoch: 1, Counter: 1, Body: escrow}, ""); err != nil {
-			s.fail(w, statusFor(err), err)
-			return
-		}
+	}
+	if err := s.DB.RegisterAccount(r.Context(), req.Account, rootPub, req.Invite, genesis, escrow); err != nil {
+		s.fail(w, statusFor(err), err)
+		return
 	}
 
 	s.Log.Info("account created", "account", req.Account)
@@ -182,5 +175,28 @@ func (s *Server) putObject(w http.ResponseWriter, r *http.Request, a authedReque
 	})
 
 	w.Header().Set("ETag", etag)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteObject removes an object and so frees the quota it held.
+//
+// `?epoch=N` deletes that epoch's copy, the same addressing GET uses. Without
+// it every epoch of the name goes: the caller asked for the object gone, and an
+// old epoch's copy left behind would still be charged against the quota this
+// call exists to free.
+func (s *Server) deleteObject(w http.ResponseWriter, r *http.Request, a authedRequest) {
+	var epoch *uint64
+	if raw := r.URL.Query().Get("epoch"); raw != "" {
+		e, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			s.fail(w, http.StatusBadRequest, errors.New("an epoch is a number"))
+			return
+		}
+		epoch = &e
+	}
+	if err := s.DB.DeleteObject(r.Context(), a.Account, r.PathValue("name"), epoch); err != nil {
+		s.fail(w, statusFor(err), err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

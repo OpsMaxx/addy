@@ -12,9 +12,15 @@ package protocol
 // is testdata/vectors.json: `_meta.version` must equal this string, and
 // vectorcheck_test.go fails if it does not, in BOTH repositories. Changing the
 // protocol without bumping this leaves the vectors claiming a version they no
-// longer describe, and the test says so; bumping it without carrying the
-// change across leaves a sidecar announcing a version this server refuses, at
-// connect time, before anything is sealed.
+// longer describe, and the test says so.
+//
+// ON THE WIRE it travels as the X-Addy-Protocol request header, and /v1/meta
+// reports it. A relay refuses a request whose header names a different version
+// with 426 before any handler runs (internal/api's protocolGate). A request
+// with NO header is let through, because OpsMaxx 0.58 shipped without sending
+// one -- so the refusal holds only for clients that announce themselves, and
+// a bump that is not carried across to the sidecar is caught there and not
+// earlier.
 //
 // See docs/decisions/0002-sharing-the-protocol-with-the-client.md.
 const ProtocolVersion = "addy-protocol-v1"

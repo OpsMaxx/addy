@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/opsmaxx/addy/internal/protocol"
 )
 
 // /v1/meta must answer WITH THE PORTAL OFF.
@@ -36,8 +38,11 @@ func TestMetaAnswersAndExposesNothingElse(t *testing.T) {
 	if body["version"] != "1.2.3" || body["build"] != "abcdef" {
 		t.Fatalf("meta is %s", rec.Body.String())
 	}
+	if body["protocol"] != protocol.ProtocolVersion {
+		t.Errorf("meta names protocol %q, want %q", body["protocol"], protocol.ProtocolVersion)
+	}
 	for key := range body {
-		if key != "version" && key != "build" {
+		if key != "version" && key != "build" && key != "protocol" {
 			t.Errorf("meta exposes %q", key)
 		}
 	}

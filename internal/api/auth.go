@@ -259,9 +259,17 @@ func (s *Server) authed(next authedHandler) http.Handler {
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+		// One byte past the limit, so an oversized body is SEEN rather than
+		// cut. Truncating it silently used to hash the first 8 MiB, fail the
+		// signature over the whole, and answer 401 -- which the client read as
+		// "this device is no longer paired" for what was only a large file.
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
 		if err != nil {
 			s.fail(w, http.StatusBadRequest, err)
+			return
+		}
+		if len(body) > maxBody {
+			s.fail(w, http.StatusRequestEntityTooLarge, fmt.Errorf("a request body is at most %d bytes", maxBody))
 			return
 		}
 

@@ -82,6 +82,23 @@ func (h *hub) sweep() {
 	}
 }
 
+// known reports whether a room exists, touching it if so, and creates it when
+// asked to. Used for the pairing marker below, where the point is precisely
+// that a READ must not bring a room into existence.
+func (h *hub) known(key string, create bool) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sweep()
+	if r := h.rooms[key]; r != nil {
+		r.touched = time.Now()
+		return true
+	}
+	if create {
+		h.rooms[key] = &room{touched: time.Now()}
+	}
+	return create
+}
+
 func (h *hub) publish(account string, frame []byte) error {
 	r := h.get(account)
 	h.mu.Lock()
@@ -135,37 +152,28 @@ type signalFrame struct {
 	Frame string `json:"frame"` // base64, opaque to the server
 }
 
-// signal is both halves: a GET waits for a frame, and a GET with a body
-// publishes one. Split by whether the request carried anything, because the
-// authorization signature already covers the body and a second method would
-// need its own.
+// signal waits for a frame in this device's own mailbox; publishSignal writes
+// one into a peer's.
+//
+// TWO METHODS, NOT ONE. This used to be a single GET that published when it
+// carried a body, on the reasoning that the authorization signature already
+// covers the body. It does -- but a GET with a body is something Node's fetch
+// refuses to send at all, so the client's publish threw before it left the
+// machine, the error was swallowed, and every direct connection fell back to
+// the mailbox without anybody being told the direct path had never worked. A
+// POST is signed exactly the same way (method, path and body hash), so
+// splitting it costs nothing the signature was providing.
 func (s *Server) signal(w http.ResponseWriter, r *http.Request, a authedRequest) {
 	// A reader takes its own mailbox, named by its device key; a writer names
 	// the peer it is writing to. There is no way to express "read the peer's
 	// mailbox", which is what stops a device draining another's frames.
 	self := "acct:" + a.Account + ":" + hex.EncodeToString(a.Device)
 
+	// Refused rather than read past. A GET with a body is the old publish, and
+	// treating it as a read would park the sender in a long poll for a frame it
+	// thinks it just sent.
 	if len(a.Body) > 0 {
-		var in signalFrame
-		if err := unmarshal(a.Body, &in); err != nil {
-			s.fail(w, http.StatusBadRequest, err)
-			return
-		}
-		frame, err := base64.StdEncoding.DecodeString(in.Frame)
-		if err != nil {
-			s.fail(w, http.StatusBadRequest, errors.New("the frame is not base64"))
-			return
-		}
-		to := r.URL.Query().Get("to")
-		if to == "" {
-			s.fail(w, http.StatusBadRequest, errors.New("a frame must name the device it is for"))
-			return
-		}
-		if err := s.hub.publish("acct:"+a.Account+":"+to, frame); err != nil {
-			s.fail(w, http.StatusTooManyRequests, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+		s.fail(w, http.StatusBadRequest, errors.New("a frame is published with POST /v1/signal, not GET"))
 		return
 	}
 
@@ -183,6 +191,29 @@ func (s *Server) signal(w http.ResponseWriter, r *http.Request, a authedRequest)
 	case <-r.Context().Done():
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func (s *Server) publishSignal(w http.ResponseWriter, r *http.Request, a authedRequest) {
+	var in signalFrame
+	if err := unmarshal(a.Body, &in); err != nil {
+		s.fail(w, http.StatusBadRequest, err)
+		return
+	}
+	frame, err := base64.StdEncoding.DecodeString(in.Frame)
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, errors.New("the frame is not base64"))
+		return
+	}
+	to := r.URL.Query().Get("to")
+	if to == "" {
+		s.fail(w, http.StatusBadRequest, errors.New("a frame must name the device it is for"))
+		return
+	}
+	if err := s.hub.publish("acct:"+a.Account+":"+to, frame); err != nil {
+		s.fail(w, http.StatusTooManyRequests, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // The pairing rendezvous, and why it is UNAUTHENTICATED.
@@ -234,6 +265,26 @@ func (s *Server) pairRendezvous(w http.ResponseWriter, r *http.Request) {
 	mine := "pair:" + id + ":" + role
 	theirs := "pair:" + id + ":" + peer
 
+	// WHETHER THIS PAIRING EXISTS ON THIS RELAY, which the mailboxes alone
+	// cannot say: a poll creates its own mailbox, so after a restart -- the
+	// rendezvous is in memory and is not coming back -- both devices went on
+	// polling empty rooms they had just recreated, and the joiner was told
+	// "the other device did not answer" three minutes later about a pairing
+	// that no longer existed anywhere.
+	//
+	// So the initiator's first frame plants a marker, every later request
+	// touches it, and a request for a pairing with no marker is answered 404:
+	// start again on the device showing the code. Only the initiator's POST
+	// creates one. A read never does, and neither does the joiner, which only
+	// ever answers a pairing somebody else began.
+	marker := "pair:" + id
+	exists := s.hub.known(marker, r.Method == http.MethodPost && role == "initiator")
+	gone := func() {
+		s.fail(w, http.StatusNotFound, errors.New(
+			"no pairing with this id is in progress on this relay: it finished, expired, "+
+				"or the relay restarted -- start again on the device showing the code"))
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
 	if err != nil {
 		s.fail(w, http.StatusBadRequest, err)
@@ -241,6 +292,10 @@ func (s *Server) pairRendezvous(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(body) > 0 {
+		if !exists {
+			gone()
+			return
+		}
 		var in signalFrame
 		if err := json.Unmarshal(body, &in); err != nil {
 			s.fail(w, http.StatusBadRequest, err)
@@ -259,6 +314,11 @@ func (s *Server) pairRendezvous(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A read of a pairing with no marker still waits out one poll rather than
+	// failing at once: a joiner can reach the relay a moment before the
+	// initiator's first frame does, and refusing it then would be a race the
+	// user loses. If the window passes and there is still no such pairing,
+	// there is not going to be one.
 	ch, cancel := s.hub.subscribe(mine)
 	defer cancel()
 
@@ -266,6 +326,10 @@ func (s *Server) pairRendezvous(w http.ResponseWriter, r *http.Request) {
 	case frame := <-ch:
 		s.ok(w, signalFrame{Frame: base64.StdEncoding.EncodeToString(frame)})
 	case <-time.After(s.pollWait()):
+		if !s.hub.known(marker, false) {
+			gone()
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	case <-r.Context().Done():
 		w.WriteHeader(http.StatusNoContent)

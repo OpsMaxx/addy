@@ -21,6 +21,7 @@ import (
 	"github.com/opsmaxx/addy/internal/operator"
 	"github.com/opsmaxx/addy/internal/overlay"
 	"github.com/opsmaxx/addy/internal/portal"
+	"github.com/opsmaxx/addy/internal/protocol"
 	"github.com/opsmaxx/addy/internal/relay"
 	"github.com/opsmaxx/addy/internal/store"
 )
@@ -471,9 +472,15 @@ func metaHandler(cfg Config) http.Handler {
 		// instance, counted its devices or named its users would hand a
 		// stranger the metadata the threat model spends its length promising
 		// to minimise.
+		//
+		// The protocol version is the one addition, and it says nothing about
+		// the instance: every relay of this build answers the same string, and
+		// it is what lets a client say "update one end" instead of failing on
+		// whatever it first tries to open.
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"version": cfg.Version,
-			"build":   cfg.BuildSha,
+			"version":  cfg.Version,
+			"build":    cfg.BuildSha,
+			"protocol": protocol.ProtocolVersion,
 		})
 	})
 }
