@@ -237,9 +237,19 @@ const POLICY_NOTE = {
  * they need to change it.
  */
 async function wireSignup(me) {
+  // Every option says what it does, not only the one in force: choosing needs
+  // all three in view.
+  for (const p of ['open', 'invite', 'closed']) $('signup-' + p + '-desc').textContent = POLICY_STATE[p]
+
+  let current = null
   const paint = (s) => {
-    $('signup-state').textContent = POLICY_STATE[s.signup] || ''
-    for (const p of ['open', 'invite', 'closed']) $('signup-' + p).disabled = s.signup === p
+    current = s.signup
+    // PRESSED, NOT DISABLED. A disabled button drops out of the tab order and
+    // throws focus to <body> the moment it is clicked; aria-pressed says the
+    // same thing to a screen reader and leaves the button where it was.
+    for (const p of ['open', 'invite', 'closed']) {
+      $('signup-' + p).setAttribute('aria-pressed', String(s.signup === p))
+    }
     $('signup-source').textContent =
       s.signupSource === 'console'
         ? 'Set from this page. It overrides ADDY_SIGNUP in the environment, which says ' + s.envDefault + '.'
@@ -247,6 +257,18 @@ async function wireSignup(me) {
   }
 
   const set = async (signup) => {
+    if (signup === current) return
+    // The one switch that hands storage to strangers is asked about first.
+    if (
+      signup === 'open' &&
+      !window.confirm(
+        'Let anybody who can sign in to your identity provider get storage on this relay?\n\n' +
+          'With a public provider such as Google that is anybody with an account there. ' +
+          'They will set up their own devices without asking you.'
+      )
+    ) {
+      return
+    }
     $('signup-saved').textContent = 'Saving…'
     try {
       paint(await api('/admin/v1/settings?signup=' + encodeURIComponent(signup), { method: 'POST' }))

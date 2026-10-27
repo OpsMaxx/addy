@@ -130,8 +130,11 @@ function paintLead(groups, me) {
   // sentence says who to ask.
   const mayMint = me.mayMint === true
   if (first && !mayMint) {
+    // A closed relay is not waiting on an admission, so it does not say so.
     $('invite-blurb').textContent =
-      'This relay gives storage to the people its operator admits, and you have not been admitted yet. Ask whoever runs it; once they have, this page lets you set up your first device without them.'
+      me.signup === 'closed'
+        ? 'This relay is not giving storage to anybody new; only its operator can set up a sync group here.'
+        : 'This relay gives storage to the people its operator admits, and you have not been admitted yet. Ask whoever runs it; once they have, this page lets you set up your first device without them.'
   }
 
   $('mint-mine-row').hidden = !first || !mayMint

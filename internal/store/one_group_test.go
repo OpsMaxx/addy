@@ -133,4 +133,16 @@ func TestAdmissionIsRecordedAndListed(t *testing.T) {
 	if err := d.SetUserAdmitted(ctx, "nobody", true); !errors.Is(err, ErrNoUser) {
 		t.Errorf("admitting nobody answered %v, want ErrNoUser", err)
 	}
+
+	// WITHDRAWING IT TAKES BACK THE INVITE THEY ALREADY HOLD.
+	token, err := d.NewInviteFor(ctx, u.UserID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetUserAdmitted(ctx, u.UserID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreateAccount(ctx, newAccountID(t), make([]byte, 32), token); !errors.Is(err, ErrInviteUnknown) {
+		t.Errorf("an invite minted before admission was withdrawn still registered: %v", err)
+	}
 }

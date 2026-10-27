@@ -484,6 +484,44 @@ func (stubAdmin) UserAdmitted(context.Context, string) (bool, error)        { re
 // choice in the console has decided at least as deliberately as whoever wrote
 // the unit file, and a restart quietly undoing it would be a trap. So the
 // stored value wins, and the console says which of the two is in force.
+// Withdrawal and admission are spelled exactly; switching to closed ends the
+// members' consoles at once; the POST answers the shape the GET does; and a
+// member refused on a closed relay is not told to ask about admission.
+func TestPolicyEdgesTheConsoleDependsOn(t *testing.T) {
+	r := relayWith(t, SignupInvite)
+
+	if code, _ := r.ask(t, operator, http.MethodPost, "/admin/v1/users/"+r.spareID+"/admitted?admitted=yes"); code != http.StatusBadRequest {
+		t.Errorf("admitted=yes answered %d, want 400", code)
+	}
+	if r.admin.admitted[r.spareID] {
+		t.Error("a misspelt admission reached the store as an admission")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/settings?signup=closed", nil)
+	req.Header.Set("Origin", "https://relay.example")
+	req.AddCookie(&http.Cookie{Name: cookieName, Value: r.opSid})
+	rec := httptest.NewRecorder()
+	r.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"envDefault":"invite"`) {
+		t.Errorf("POST settings = %d %s; want the GET's shape, envDefault included", rec.Code, rec.Body.String())
+	}
+	if _, ok := r.auth.Session(r.memSid); ok {
+		t.Error("switching to closed left a member's console session alive")
+	}
+	if _, ok := r.auth.Session(r.opSid); !ok {
+		t.Error("switching to closed ended the operator's own session")
+	}
+
+	// The member's session is gone, so restore one to read the refusal.
+	r.auth.mu.Lock()
+	r.auth.sessions[key(r.memSid)] = session{userID: r.memID, expires: r.auth.now().Add(time.Hour)}
+	r.auth.mu.Unlock()
+	if code, body := r.ask(t, member, http.MethodPost, "/admin/v1/my/invite"); code != http.StatusForbidden ||
+		strings.Contains(body, "admitted") {
+		t.Errorf("a member refused on a closed relay got %d %s; want 403 without the admission message", code, body)
+	}
+}
+
 func TestTheOperatorChangesTheSignupPolicyFromTheConsole(t *testing.T) {
 	store := newStore()
 	owner := newIDP(t, "the-owner", "owner@example.com")

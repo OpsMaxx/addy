@@ -109,7 +109,6 @@ release history in plain text:
 ```sh
 kubectl create secret generic addy-oidc --from-literal=client-secret='<your client secret>'
 helm upgrade addy deploy/helm/addy --reuse-values \
-  --set portal.enabled=true \
   --set oidc.issuer=https://accounts.google.com \
   --set oidc.clientID='<your client id>' \
   --set oidc.clientSecretName=addy-oidc
@@ -127,8 +126,10 @@ ExecStart=/usr/local/bin/addy serve \
   -ui
 ```
 
-`-ui` serves the public portal. The console's API is mounted whether or not
-`-ui` is on, but the page it renders comes from the portal, so you want both.
+The console — its pages and its API — is served whenever the three sign-in
+settings are, with or without `-ui`. `-ui` adds the rest of the public portal:
+the front page and the paste reader. Turn it on (or `portal.enabled` in Helm)
+only if you want those.
 
 Check it worked:
 
@@ -153,7 +154,9 @@ you.
 The console's *Who may sign in* card shows and changes the policy without a
 restart; a value set there overrides `ADDY_SIGNUP`. Admitting somebody is the
 **Admit** button beside them in the People list, shown while the policy is
-`invite`. The policy is enforced on the server, not by hiding a button.
+`invite`; withdrawing it also cancels any invite they minted and have not yet
+used. Switching to `closed` signs every member out of the console at once.
+The policy is enforced on the server, not by hiding a button.
 
 Whoever claimed the relay is its operator and is not subject to this — §5.
 
@@ -175,17 +178,23 @@ before you go further.
 
 Open `https://YOUR-RELAY-DOMAIN/admin` and sign in. **Do this now, not later.**
 
-You should land on the console showing your email. Then:
+You land on `/console`, your own space, showing your email and a *You run this
+relay* card. Its **Operator console** link opens `/console/relay`, which is the
+relay's:
 
-- **Create an invite** — hand it to whoever is setting up their first device.
-  It is shown once, works once, and expires in 24 hours by default.
-- **Accounts** — an identifier, a count of roster entries, bytes used, a
+- **Invite somebody who will not sign in** — hand the invite to whoever is
+  setting up their first device. It is shown once, works once, and expires in
+  24 hours by default. (The invite button on `/console` is for your own first
+  device.)
+- **Sync groups** — an identifier, a count of roster entries, bytes used, a
   quota. That is everything this relay knows. Roster entries are not devices:
   a removed device and a key rotation each add one.
 
-To check the claim did what it should: sign in from a different Google account
-and confirm it is refused with *"this relay already has an operator, and it is
-not this account"*.
+To check the claim did what it should: sign in from a different Google account.
+It is a member, not the operator: `/console` shows no *You run this relay*
+card, and `/console/relay` says *"This relay is not yours to run"*. (With the
+policy at `closed`, the sign-in itself is refused with *"this relay is not open
+for sign-in; ask whoever runs it"*.)
 
 ### If you claim it with the wrong account
 
@@ -235,12 +244,12 @@ publishes no discovery document.
 | What you see | What it is |
 |---|---|
 | `redirect_uri_mismatch` on Google's page | §3 — the registered URI is not what the relay sent. Compare it against the `redirect=` in the startup log. |
-| `this relay already has an operator` | Somebody claimed it. If that was you on another account, see §5. |
+| `/console/relay` says *This relay is not yours to run* | You are signed in as an account that did not claim it. If the claim was you on another account, see §5. |
 | `that sign-in is no longer in progress` | A back button, a bookmarked callback, or a replayed redirect. Start at `/admin` again. |
 | `that issuer does not advertise the endpoints this needs` | The issuer URL is wrong, or the provider is OAuth-only. §6. |
 | The page says no sign-in is configured | None of the three reached the process. Check `.env` (or the unit's `EnvironmentFile`) and that the container was recreated, not just restarted. |
 | addy exits with `operator sign-in is half configured` | One or two of the three are set; the message names the rest. |
-| 404 on `/admin` | `-ui` is off, so the portal serves no pages. |
+| 404 on `/console` or `/admin` | None of the three sign-in settings reached the process, and `-ui` is off, so no pages are served at all. |
 
 ## 8. What this does not do
 
