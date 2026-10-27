@@ -281,7 +281,8 @@ two purposes. The fix is structural, not procedural:
 The four device prefixes are `addy-login-v1\0`, `addy-authz-v1\0`,
 `addy-roster-v1\0` and `addy-signal-v1\0`. `DESIGN.md` names
 `addy-roster-v1\0` explicitly; the other three follow its pattern. The root
-key has one more, `addy-escrow-write-v1\0` (4.5).
+key has one more, `addy-escrow-write-v1\0` (4.5), and device-to-device mail
+added `addy-mail-v1\0` (4.6).
 
 ### 4.1 Login — signed by `DK_sign`
 
@@ -414,6 +415,40 @@ escrow at the same epoch and counter, which is the write it authorised.
 
 A recovering device MUST NOT treat an escrow past the roster's end as a
 rollback unless it opens under `RK_enc` for that account and epoch.
+
+### 4.6 Mail — signed by `DK_sign`, sealed to the recipient's `DK_enc`
+
+What one device leaves for one other in `/v1/mail` (a clipboard, a file
+notice). The relay stores `sealed` opaquely and routes on `toDevice`.
+
+```
+domain        : literal     "addy-mail-v1\0"
+account_id    : fixed[16]
+kind          : str          the mail's kind, e.g. "clipboard", "transfer"
+from          : fixed[32]    sender's DK_sign.pub
+to            : fixed[32]    recipient's DK_sign.pub
+nonce         : fixed[32]    the sender's
+ts            : u64          ms, the sender's clock
+payload_hash  : fixed[32]    SHA-256 of the payload
+```
+
+`sealed` is `"addy-mail-obj-v1\0" || u8(suite) || bytes(enc) || bytes(ct)`:
+single-shot HPKE (the §1 suite) to the recipient's `DK_enc` from the roster,
+info `"addy-mail-hpke-v1\0" || account_id || to || str(kind)`, no AAD, over
+`"addy-mail-pt-v1\0" || from || nonce || u64(ts) || sig[64] || bytes(payload)`.
+
+A recipient MUST verify the signature with `to` set to its own key, and MUST
+accept it only when `from` is a live device in a roster it verified itself —
+never on the relay's `fromDevice`. `to` is signed so a recipient cannot
+re-seal a mail to a third device; `kind` so a clipboard is not a file notice.
+It SHOULD refuse a `(from, nonce)` it has already opened and a `ts` outside the
+mail's window. Mail was previously a §7 object under the epoch key, readable
+and writable by every holder of `AK_n`, a removed device included until the
+next rotation; such mail MUST be refused.
+
+A payload too big for mail travels as an object sealed under a one-time key
+carried in the mail: `"addy-mail-blob-v1\0" || nonce[24] || XChaCha20-Poly1305
+ciphertext`, with the domain prefix as AAD.
 
 ### 5.1 Entry body — `addy-roster-v1\0`
 
