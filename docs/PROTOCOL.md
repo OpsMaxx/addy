@@ -792,7 +792,12 @@ code), `B` = the joining device (the one typing it). Identity strings are the
 fixed ASCII `addy-pair-init` and `addy-pair-join`; they are constants, not
 device identifiers, because the devices have no shared names yet.
 
-Three frames on `/v1/signal`, two of which carry PAKE material:
+Three frames, two of which carry PAKE material. They travel over the
+**pairing rendezvous**, `/v1/pair/{pairing_id}?as=initiator|joiner` (§11.1),
+not over `/v1/signal`: the joiner has no session and does not know the
+account id, so it cannot use an authenticated route. It is a long poll, not a
+WebSocket. Each role `POST`s `{"frame": base64}` into the other's mailbox (204)
+and `GET`s its own (200 with a frame, or 204 when the poll window passes empty):
 
 | # | Frame | From | Carries |
 |---|---|---|---|
@@ -1073,6 +1078,29 @@ gating first launch trains people to screenshot it.
 The epoch is in the path **and** in the AAD of the object it names. The path is
 the server's; the AAD is the client's. Only one of them is trustworthy, and the
 other exists so a mismatch is loud.
+
+### 11.1 The HTTP calls, and the statuses a client acts on
+
+The relay's routes live in `internal/api/api.go`; this lists the ones whose
+contract a client has to agree with. On the wire an object is addressed as
+`/v1/obj/{name}?epoch=N` within the session's own account, which the server
+takes from the session and never from the path.
+
+Every request MAY carry `X-Addy-Protocol: addy-protocol-v1` (the value of
+`protocol.ProtocolVersion`). A relay answers **426** to a request whose header
+names a different version, before any handler runs. A request with no header is
+let through, because OpsMaxx 0.58 shipped without sending one. `GET /v1/meta`
+reports `{"version", "build", "protocol"}`.
+
+| Call | Answers |
+|---|---|
+| `GET /v1/signal` | Waits for a frame in this device's own mailbox: 200 `{"frame"}`, or 204 when the poll window passes. A `GET` with a body is refused with 400. |
+| `POST /v1/signal?to={peer DK_sign hex}` | Body `{"frame": base64}`, into that peer's mailbox in the same account: 204. |
+| `DELETE /v1/obj/{name}[?epoch=N]` | 204, or 404 when there is nothing to delete. Without `epoch`, every epoch of the name goes. Frees the quota the object held. |
+| `POST`/`GET /v1/pair/{pairing_id}?as=…` | Unauthenticated, §8.3. **404** means this relay has no pairing with that id: it finished, expired, or the relay restarted, since the rendezvous is held in memory. The device should say "start again" rather than keep polling. Only the initiator's first `POST` creates a pairing. A `GET` for an unknown id waits out one poll window before answering 404, so a joiner that arrives a moment early is not refused. |
+| any authenticated call | **413** when the body is over 8 MiB. The relay reads one byte past the limit and refuses; it never truncates. Before this, a truncated body failed its request signature and came back as a misleading 401. |
+
+All errors are JSON `{"error": "…"}`.
 
 ---
 

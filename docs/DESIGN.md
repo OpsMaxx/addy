@@ -475,9 +475,13 @@ it. That rules out "type this token into a box" and rules in a PAKE.
 
 1. Existing device generates a short code and shows it: `42-inkwell-flatfoot`.
 2. New device types it.
-3. Both run **SPAKE2** over addy's own `/v1/signal` WebSocket. The server carries
-   the messages and learns nothing from them; a wrong guess costs an attempt, and
-   attempts are rate-limited and burn the code.
+3. Both run **SPAKE2** through addy's pairing rendezvous, a long poll on
+   `/v1/pair/{pairing_id}` (PROTOCOL.md §8.3, §11.1). It is unauthenticated,
+   because the joining device has no session yet. The server carries the
+   messages and learns nothing from them; a wrong guess costs an attempt, and
+   attempts are rate-limited and burn the code. The rendezvous is in memory, so
+   a relay restart ends any pairing in progress, and the relay then answers 404
+   so both devices can say "start again".
 4. Both display **7 emoji** in the Matrix SAS format, derived by HKDF from the
    PAKE transcript. The human confirms they match. This is the out-of-band check,
    and it is what defeats a server that tries to sit in the middle.
@@ -513,8 +517,8 @@ handed to the attacker:
 > reference mailbox server is Python, and the Go ports are abandoned hobby forks.
 > Embedding magic-wormhole would mean either shipping a Python sidecar or
 > reimplementing the nameplate/mailbox/phase protocol, and **neither is needed**:
-> addy already owns a WebSocket between the two devices. SPAKE2 is a two-message
-> exchange; carrying it over `/v1/signal` is ~100 lines against
+> addy already relays frames between two devices. SPAKE2 is a two-message
+> exchange; carrying it over addy's own rendezvous (`/v1/pair`) is ~100 lines against
 > `salsa.debian.org/vasudev/gospake2` (the same library wormhole-william itself
 > uses). Frozen upstream, but SPAKE2 is a finished spec, not a moving target.
 >
