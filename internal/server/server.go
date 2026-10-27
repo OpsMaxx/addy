@@ -339,6 +339,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}()
 
 	go sweepConflicts(ctx, db, log, time.Hour, conflictMaxAge)
+	go sweepExpired(ctx, db, log, time.Hour)
 
 	log.Info("addy starting",
 		"version", cfg.Version,
@@ -380,6 +381,35 @@ func sweepConflicts(ctx context.Context, db *store.DB, log *slog.Logger, every, 
 			}
 		} else if n > 0 {
 			log.Warn("conflict copies expired unresolved and were deleted", "dropped", n, "age", age)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// sweepExpired removes mail past its 48-hour expiry and pastes past their
+// deletion date, once now and then every `every` until ctx ends.
+//
+// Both sweeps existed and neither had a caller. Expiry already stops either
+// being read, so nothing a person sees changes; what changes is that up to
+// 4 MiB per undelivered message and every burnt paste stop being kept for
+// ever on a relay nobody is watching.
+func sweepExpired(ctx context.Context, db *store.DB, log *slog.Logger, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		for name, sweep := range map[string]func(context.Context) (int64, error){
+			"mailbox": db.SweepMailbox,
+			"pastes":  db.SweepPastes,
+		} {
+			if n, err := sweep(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("sweeping expired rows failed", "table", name, "err", err)
+			} else if n > 0 {
+				log.Info("swept expired rows", "table", name, "dropped", n)
+			}
 		}
 		select {
 		case <-ctx.Done():
