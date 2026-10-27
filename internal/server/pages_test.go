@@ -56,3 +56,23 @@ func TestTheConsoleIsServedWheneverSignInIs(t *testing.T) {
 		}
 	}
 }
+
+// A dev relay left on its default address listens on 127.0.0.1:8443. The
+// sign-in's redirect URI and Origin check were built from -addr alone, so
+// with -addr unset they named https://localhost — port 443, where nothing
+// answers — and every dev sign-in failed on the way back.
+func TestTheDevSignInNamesThePortTheRelayListensOn(t *testing.T) {
+	for _, c := range []struct {
+		cfg  Config
+		want string
+	}{
+		{Config{Dev: true}, "https://localhost:8443"},
+		{Config{Dev: true, Addr: "127.0.0.1:9000"}, "https://localhost:9000"},
+		{Config{Dev: true, Addr: ":443"}, "https://localhost"},
+		{Config{Domain: "relay.example", Addr: ":8443"}, "https://relay.example"},
+	} {
+		if got := operatorBaseURL(c.cfg); got != c.want {
+			t.Errorf("%+v: base %q, want %q", c.cfg, got, c.want)
+		}
+	}
+}

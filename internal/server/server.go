@@ -254,18 +254,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// wants to mint an invite from a browser should not have to also serve the
 	// public portal to do it. The console PAGES those routes answer are served
 	// with them for the same reason — see pagesFor.
-	operatorBase := "https://" + cfg.Domain
-	if cfg.Dev {
-		// LOCALHOST, NOT THE BIND ADDRESS. `-dev` binds 127.0.0.1 by default,
-		// and the front door gates on SNI — which an IP literal has none of,
-		// so a redirect URI built from the bind address is one this relay
-		// refuses to answer. The dev hosts are `localhost` and
-		// `addy.localhost`; only the port carries over.
-		operatorBase = "https://localhost"
-		if _, port, err := net.SplitHostPort(cfg.Addr); err == nil && port != "" {
-			operatorBase += ":" + port
-		}
-	}
+	operatorBase := operatorBaseURL(cfg)
 	opCfg := operator.Config{
 		Issuer:       cfg.OIDCIssuer,
 		ClientID:     cfg.OIDCClientID,
@@ -713,4 +702,25 @@ func pagesFor(cfg Config, signIn bool) (http.Handler, error) {
 		return nil, fmt.Errorf("building the portal: %w", err)
 	}
 	return portal.NoServiceWorker(p), nil
+}
+
+// operatorBaseURL is the origin the sign-in's redirect URI and Origin check
+// are built on.
+//
+// LOCALHOST, NOT THE BIND ADDRESS, under -dev. `-dev` binds 127.0.0.1 by
+// default, and the front door gates on SNI — which an IP literal has none of,
+// so a redirect URI built from the bind address is one this relay refuses to
+// answer. The dev hosts are `localhost` and `addy.localhost`; only the port
+// carries over — and it is the port the relay actually LISTENS on. Reading it
+// from -addr alone dropped it whenever -addr was left to its default, so a
+// dev relay on :8443 told the provider to send people back to :443.
+func operatorBaseURL(cfg Config) string {
+	if !cfg.Dev {
+		return "https://" + cfg.Domain
+	}
+	base := "https://localhost"
+	if _, port, err := net.SplitHostPort(cfg.resolvedAddr()); err == nil && port != "" && port != "443" {
+		base += ":" + port
+	}
+	return base
 }
