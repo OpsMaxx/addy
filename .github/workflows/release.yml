@@ -248,7 +248,6 @@ jobs:
           files: |
             dist/*
             deploy/compose/docker-compose.yml
-            deploy/compose/garage.toml
             deploy/compose/install.sh
           body_path: release-notes.md
           # Draft first. The next step checks what actually landed and only

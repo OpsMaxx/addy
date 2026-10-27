@@ -1,59 +1,13 @@
-# addy + Garage on one box.
+# addy on one box.
 #
 # install.sh writes .env next to this file and never edits this file.
 #
-# WHAT BREAKS IF THIS IS WRONG
-#
-# - Garage's image is FROM scratch. It has no shell and no curl, so a
-#   healthcheck written as CMD-SHELL or as a curl invocation fails with an exec
-#   error that surfaces only as "unhealthy" -- and the operator then spends an
-#   hour debugging a cluster that is fine. `/garage health -q` in exec form is
-#   the only shape that works.
-# - Garage refuses to start if a secret FILE is group- or world-readable. Every
-#   secret here arrives by environment from .env (mode 0600) rather than as a
-#   file, which sidesteps that check. If you switch to the *_file variants, the
-#   0600 becomes yours to maintain.
-# - addy is host-networked, so it is NOT on the compose bridge and CANNOT
-#   resolve `garage` by service name. It reaches it at 127.0.0.1:3900.
+# GARAGE IS GONE. Earlier versions of this file ran a Garage S3 node for blobs,
+# and nothing ever read it: objects live in SQLite and the ADDY_S3_* settings
+# were never wired into the binary. It cost the installer a 2 GiB / 2 vCPU /
+# 20 GiB floor and three secrets for a service with no client.
 
 services:
-  garage:
-    image: dxflrs/garage:v2.4.1
-    container_name: addy-garage
-    restart: unless-stopped
-    # --single-node builds and applies a one-node layout on first start, and
-    # does nothing on every start after that. --default-bucket creates the
-    # bucket and re-grants the default key read+write+owner on every boot.
-    # Both are idempotent upstream, which is why the installer does not
-    # orchestrate a layout-assign/layout-apply sequence at all.
-    command: ["/garage", "server", "--single-node", "--default-bucket"]
-    environment:
-      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:?run install.sh}
-      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:?run install.sh}
-      GARAGE_DEFAULT_BUCKET: ${GARAGE_DEFAULT_BUCKET:-addy}
-      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?run install.sh}
-    ports:
-      # Loopback only, and only the two an operator needs from the host: 3900
-      # so `aws s3` works for debugging, 3903 for the admin API. 3901 (RPC) and
-      # 3902 (web) are not published at all.
-      - "127.0.0.1:3900:3900"
-      - "127.0.0.1:3903:3903"
-    volumes:
-      - ./garage.toml:/etc/garage.toml:ro
-      - garage-meta:/var/lib/garage/meta
-      - garage-data:/var/lib/garage/data
-    healthcheck:
-      # `garage health` exits non-zero while the cluster cannot serve. Before
-      # the layout is applied there are no storage nodes, so this stays red
-      # until the bootstrap has actually finished -- which is what makes
-      # depends_on below mean "can take a PUT" rather than "the process
-      # started".
-      test: ["CMD", "/garage", "health", "-q"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
-
   addy:
     image: ghcr.io/opsmaxx/addy:${ADDY_VERSION:-latest}
     container_name: addy
@@ -76,11 +30,6 @@ services:
       ADDY_DOMAIN: ${ADDY_DOMAIN:?run install.sh}
       ADDY_ACME_EMAIL: ${ADDY_ACME_EMAIL:-}
       ADDY_DATA_DIR: /var/lib/addy
-      ADDY_S3_ENDPOINT: http://127.0.0.1:3900
-      ADDY_S3_REGION: garage
-      ADDY_S3_BUCKET: ${GARAGE_DEFAULT_BUCKET:-addy}
-      ADDY_S3_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:?}
-      ADDY_S3_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:?}
       ADDY_TURN_SECRET: ${ADDY_TURN_SECRET:?run install.sh}
       # The relay runs only when it knows the address to advertise, and
       # install.sh writes the IPv4 it detected. Empty means no relay. The
@@ -98,9 +47,6 @@ services:
     volumes:
       # SQLite, certmagic's storage, and the PEM exported for other services.
       - addy-state:/var/lib/addy
-    depends_on:
-      garage:
-        condition: service_healthy
     healthcheck:
       # Loopback, naming the domain. Without -connect the probe resolved the
       # domain through public DNS and so depended on the provider routing the
@@ -114,6 +60,4 @@ services:
       start_period: 90s
 
 volumes:
-  garage-meta:
-  garage-data:
   addy-state:

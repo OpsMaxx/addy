@@ -61,9 +61,9 @@ fi
 
 set -euo pipefail
 
-ADDY_MIN_MEM_KB=1900000        # ~2 GiB, allowing for what the kernel reserves
-ADDY_MIN_CPUS=2
-ADDY_MIN_DISK_KB=20971520      # 20 GiB on the Docker data root
+ADDY_MIN_MEM_KB=450000         # ~512 MiB, allowing for what the kernel reserves
+ADDY_MIN_CPUS=1
+ADDY_MIN_DISK_KB=2097152       # 2 GiB on the Docker data root
 INSTALL_DIR="${ADDY_INSTALL_DIR:-/opt/addy}"
 COMPOSE=()                     # filled in by check_docker
 PUBLIC_V4=""                   # filled in by check_dns
@@ -137,13 +137,13 @@ check_docker() {
 
   # `docker compose` (the v2 plugin) and `docker-compose` (the retired Python
   # v1) are different programs with different schema support. v1 does not
-  # understand `depends_on: {condition: service_healthy}` and will start addy
-  # before Garage can take a PUT -- silently, which is the problem.
+  # understand the compose schema this bundle is written for, and gets parts
+  # of it wrong silently rather than refusing -- which is the problem.
   if docker compose version >/dev/null 2>&1; then
     COMPOSE=(docker compose)
   else
     refuse \
-      "The Docker Compose v2 plugin is missing. A standalone docker-compose binary is not a substitute: it ignores the healthcheck gate this deployment depends on." \
+      "The Docker Compose v2 plugin is missing. A standalone docker-compose binary is not a substitute: it reads this compose file differently and does not say so." \
       "apt-get install docker-compose-plugin    (or this distro's equivalent)"
   fi
 }
@@ -158,15 +158,15 @@ check_size() {
   disk="$(df -Pk "$root" | awk 'NR==2 {print $4}')"
 
   [ "$mem" -ge "$ADDY_MIN_MEM_KB" ] || refuse \
-    "This box has $((mem/1024)) MiB of RAM. addy needs at least 2 GiB." \
-    "Resize the VPS. Garage memory-maps its LMDB metadata store and addy holds relay buffers per session; 1 GiB boxes OOM under the first concurrent upload."
+    "This box has $((mem/1024)) MiB of RAM. addy needs at least 512 MiB." \
+    "Resize the VPS. addy holds relay buffers per session and a request body up to 8 MiB in memory; below 512 MiB a few concurrent uploads are enough to OOM it."
 
   [ "$cpus" -ge "$ADDY_MIN_CPUS" ] || refuse \
-    "This box has $cpus vCPU. addy needs at least 2." \
-    "Resize the VPS. One core is shared between TLS termination, the DTLS and SRTP work in the TURN path, and Garage's background scrubber, and they contend."
+    "This box has $cpus vCPU. addy needs at least 1." \
+    "Resize the VPS."
 
   [ "$disk" -ge "$ADDY_MIN_DISK_KB" ] || refuse \
-    "Only $((disk/1024/1024)) GiB free on $root. addy needs at least 20 GiB." \
+    "Only $((disk/1024/1024)) GiB free on $root. addy needs at least 2 GiB." \
     "Attach or grow a volume at $root."
 }
 
@@ -338,7 +338,7 @@ ingress come up most -- or a network appliance in front of the box." \
 # --- install ---------------------------------------------------------------
 
 # THE COMPOSE FILE MATCHING THE IMAGE. Each release carries its own
-# docker-compose.yml and garage.toml as release files, so a box pinned to
+# docker-compose.yml as a release file, so a box pinned to
 # ADDY_VERSION=0.1.0 gets 0.1.0's compose file. This used to fetch one
 # unversioned bundle whatever the version, so pinning an older release paired
 # it with the newest compose file -- environment and flags it might not know.
@@ -352,24 +352,20 @@ fetch_bundle() {
       base="$ADDY_RELEASES/download/v$ADDY_VERSION"
     fi
   fi
-  for f in docker-compose.yml garage.toml; do
-    retry_network "downloading $f" \
-      curl -fsSL "$base/$f" -o "$INSTALL_DIR/$f.new" || refuse \
-      "Could not download $f from $base." \
-      "Check that release exists. A private repository's release files need a token; ADDY_BUNDLE_URL points the installer at a copy you host instead."
-    mv "$INSTALL_DIR/$f.new" "$INSTALL_DIR/$f"
-  done
-  chmod 644 "$INSTALL_DIR/garage.toml"
+  f=docker-compose.yml
+  retry_network "downloading $f" \
+    curl -fsSL "$base/$f" -o "$INSTALL_DIR/$f.new" || refuse \
+    "Could not download $f from $base." \
+    "Check that release exists. A private repository's release files need a token; ADDY_BUNDLE_URL points the installer at a copy you host instead."
+  mv "$INSTALL_DIR/$f.new" "$INSTALL_DIR/$f"
 }
 
 gen_env() {
   local domain="$1" email="$2" env_file="$INSTALL_DIR/.env"
 
   # THE re-runnability rule. .env is the source of truth and is never
-  # regenerated. A regenerated GARAGE_DEFAULT_SECRET_KEY is not a fresh start,
-  # it is a hard Garage startup error naming a key id; and a regenerated
-  # ADDY_TURN_SECRET invalidates every credential already issued to a
-  # connected client.
+  # regenerated: a regenerated ADDY_TURN_SECRET invalidates every credential
+  # already issued to a connected client.
   if [ -f "$env_file" ]; then
     log "keeping the existing $env_file (this is a re-run)"
     return 0
@@ -383,11 +379,6 @@ gen_env() {
 ADDY_DOMAIN=$domain
 ADDY_ACME_EMAIL=$email
 ADDY_VERSION=$ADDY_VERSION
-
-GARAGE_RPC_SECRET=$(openssl rand -hex 32)
-GARAGE_DEFAULT_ACCESS_KEY=addy-$(openssl rand -hex 8)
-GARAGE_DEFAULT_SECRET_KEY=$(openssl rand -hex 32)
-GARAGE_DEFAULT_BUCKET=addy
 
 ADDY_TURN_SECRET=$(openssl rand -hex 32)
 ADDY_TURN_PUBLIC_IP=$PUBLIC_V4

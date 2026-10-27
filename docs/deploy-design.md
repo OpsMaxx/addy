@@ -18,6 +18,8 @@
 >   `-quick` checks `/v1/meta` over TLS only; the TURN steps in §4 are not
 >   implemented.
 
+> **Superseded for Garage (2026-10-28):** Garage was removed from the compose bundle before the first release; nothing read it. The Garage findings below are kept as the research record.
+
 > Research note, 2026-09-17. Everything about Garage below was verified against
 > upstream at tag `v2.4.1` (the pin in `DESIGN.md`) — the published OpenAPI
 > document, the book sources in `doc/book/`, and where behaviour mattered, the
