@@ -23,6 +23,12 @@ spec:
     metadata:
       labels: {{- include "addy.labels" . | nindent 8 }}
     spec:
+      {{- if .Values.turn.hostNetwork }}
+      # The node's own network, so the relay range reaches the pod -- see
+      # values.yaml. ClusterFirstWithHostNet keeps cluster DNS working.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -98,6 +104,18 @@ spec:
           # into one that cannot finish. Not Ready is the honest state for it;
           # the Service still routes to it (publishNotReadyAddresses) so the
           # ACME challenge can arrive.
+          #
+          # STARTUP SLACK. Before an upgrade that changes the schema, addy
+          # copies its database, and nothing listens on 443 until the copy is
+          # done. A database of a few GB takes minutes, and the liveness probe
+          # used to kill it partway -- leaving half a copy and a restart loop.
+          # Liveness waits until the socket has answered once, for up to
+          # fifteen minutes.
+          startupProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 10
+            failureThreshold: 90
           livenessProbe:
             tcpSocket:
               port: https

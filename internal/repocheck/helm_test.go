@@ -74,6 +74,8 @@ func TestTheChartRefusesTheThingsItShould(t *testing.T) {
 	for _, want := range []struct{ needle, why string }{
 		{"addy needs a domain", "a release with no domain"},
 		{"turn.enabled needs turn.publicIP", "a relay that would advertise an address it cannot know"},
+		{"turn.enabled needs turn.hostNetwork", "a relay whose range no Service carries"},
+		{"oidc needs issuer, clientID and clientSecretName together", "half a sign-in config, which addy refuses at startup"},
 	} {
 		if !strings.Contains(helpers, want.needle) {
 			t.Errorf("the chart no longer refuses %s", want.why)
@@ -132,7 +134,11 @@ func TestTheProbesCanPass(t *testing.T) {
 			Template struct {
 				Spec struct {
 					Containers []struct {
-						Liveness  map[string]any `yaml:"livenessProbe"`
+						Liveness map[string]any `yaml:"livenessProbe"`
+						Startup  struct {
+							PeriodSeconds    int `yaml:"periodSeconds"`
+							FailureThreshold int `yaml:"failureThreshold"`
+						} `yaml:"startupProbe"`
 						Readiness struct {
 							Exec struct {
 								Command []string `yaml:"command"`
@@ -166,6 +172,17 @@ func TestTheProbesCanPass(t *testing.T) {
 	// issuance restarts the pod mid-order.
 	if _, ok := c.Liveness["tcpSocket"]; !ok {
 		t.Errorf("liveness is %v; anything that needs TLS restarts the pod before its certificate is issued", c.Liveness)
+	}
+	// Nothing listens while a pre-upgrade database copy runs, and liveness
+	// used to kill the pod mid-copy. Ten minutes at least before it may.
+	if c.Startup.PeriodSeconds*c.Startup.FailureThreshold < 600 {
+		t.Errorf("the startup probe allows %ds; a multi-GB database copy needs minutes",
+			c.Startup.PeriodSeconds*c.Startup.FailureThreshold)
+	}
+	// preflight binds :80, which the running pod already holds, so telling
+	// an operator to run it there sends them to a failure every time.
+	if strings.Contains(readChartFile(t, "templates", "NOTES.txt"), "-- /addy preflight") {
+		t.Error("NOTES.txt runs preflight inside the running pod, where port 80 is addy's")
 	}
 	// And Not Ready must still receive the ACME challenge.
 	if !strings.Contains(readChartFile(t, "templates", "service.yaml"), "publishNotReadyAddresses: true") {

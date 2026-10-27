@@ -30,10 +30,13 @@ import (
 // Every raise goes in with its reason, so the history of this map is the
 // history of the workflow getting more complicated and someone noticing.
 var ceiling = map[string]int{
-	"Check the tag matches the version the binary reports": 12,
-	"Build every target":              3,
-	"Check the build is reproducible": 10,
-	"Scan the binaries with ClamAV":   18,
+	// 16: also checks Chart.yaml's appVersion, which the chart pulls by default.
+	"Check the tag matches the version the binary reports": 16,
+	"Copy the image's binaries out for scanning":           8,
+	"Tag the scanned image":                                6,
+	"Build every target":                                   3,
+	"Check the build is reproducible":                      10,
+	"Scan the binaries with ClamAV":                        18,
 	// 46: the notes carry an install line, the container reference, a
 	// per-platform download table and a checksum table, and each of those is a
 	// row of shell rather than a line of prose.
@@ -153,11 +156,13 @@ func TestTheReleaseIsDraftedBeforeItIsVerified(t *testing.T) {
 }
 
 // The image is pushed under the tag the chart and the installer pull, only
-// after the tests pass, and never as `:latest` for a prerelease.
+// after the tests pass AND the scans pass, and never as `:latest` for a
+// prerelease.
 //
 // It used to be pushed as `:v0.1.0` while the chart pulled `:0.1.0`, in a job
-// that did not wait for the tests -- and the VirusTotal step read its key from
-// its own `env`, which a step's `if:` cannot see, so it never ran.
+// that did not wait for the tests; then as `:0.1.0` and `:latest` before the
+// release job had scanned anything. The VirusTotal step read its key from its
+// own `env`, which a step's `if:` cannot see, so it never ran.
 func TestTheImageIsTaggedTheWayEverythingPullsIt(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(repoRoot(t), ".github", "workflows", "release.yml"))
 	if err != nil {
@@ -184,23 +189,33 @@ func TestTheImageIsTaggedTheWayEverythingPullsIt(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(image.Needs), "build") {
 		t.Error("the image job does not wait for the build job, which is where the tests run")
 	}
-	var naming, push string
 	for _, s := range image.Steps {
-		if s.Name == "Name the image" {
-			naming = s.Run
+		if _, ok := s.With["tags"]; ok {
+			t.Errorf("the image job pushes named tags (%v) before anything is scanned", s.With["tags"])
 		}
-		if tags, ok := s.With["tags"]; ok {
-			push = fmt.Sprint(tags)
+		if out, ok := s.With["outputs"]; ok && !strings.Contains(fmt.Sprint(out), "push-by-digest=true") {
+			t.Errorf("the image job pushes %v; it should push by digest only", out)
 		}
+	}
+
+	clam, tag := -1, -1
+	var naming string
+	for i, s := range wf.Jobs["release"].Steps {
+		if strings.Contains(s.Name, "ClamAV") {
+			clam = i
+		}
+		if s.Name == "Tag the scanned image" {
+			tag, naming = i, s.Run
+		}
+	}
+	if tag < 0 || clam < 0 || tag < clam {
+		t.Errorf("the image is tagged at step %d and scanned at step %d; tagging must come after the scan", tag, clam)
 	}
 	if !strings.Contains(naming, `${GITHUB_REF_NAME#v}`) {
 		t.Error("the image tag keeps the git tag's `v`; the chart and installer pull it without one")
 	}
 	if !strings.Contains(naming, "*-*") {
 		t.Error("`:latest` is not withheld from prereleases")
-	}
-	if strings.Contains(push, "ref_name") || strings.Contains(push, ":latest") {
-		t.Errorf("the push names its tags directly (%s) instead of using the computed ones", push)
 	}
 
 	release := wf.Jobs["release"]

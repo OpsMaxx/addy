@@ -12,11 +12,16 @@ to arrange:
      at all, and a certificate that cannot be issued is a relay that cannot be
      reached.
 
-Check both before you debug anything else:
+The pod is Not Ready until its certificate is issued -- that is expected, and
+the Service still carries the challenge to it. While it waits, addy says why
+in its log once a minute:
 
-    kubectl exec -it {{ include "addy.fullname" . }}-0 -- /addy preflight -domain {{ .Values.domain }}
+    kubectl logs {{ include "addy.fullname" . }}-0 | grep -A6 'TLS is not being served'
 
-Then prove it actually works, rather than that it started:
+(Not `addy preflight`: it proves port 80 by binding it, and in the running pod
+addy already holds it.)
+
+Once it is Ready, prove it actually works, rather than that it started:
 
     kubectl exec -it {{ include "addy.fullname" . }}-0 -- /addy selftest -connect 127.0.0.1:443 -data /var/lib/addy
 
