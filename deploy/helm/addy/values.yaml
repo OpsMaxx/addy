@@ -18,7 +18,9 @@
 image:
   repository: ghcr.io/opsmaxx/addy
   # Pinned rather than `latest`. A relay that changes version because a node
-  # rescheduled is one whose behaviour nobody can reason about.
+  # rescheduled is one whose behaviour nobody can reason about. Empty means
+  # the chart's appVersion. Images are tagged WITHOUT the git tag's `v` --
+  # `0.1.0`, not `v0.1.0` -- the same string `addy version` prints.
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -44,13 +46,31 @@ service:
 # and cannot infer it behind NAT or behind a Service, so a relay that guesses
 # allocates addresses nobody can reach -- and fails only under the NAT
 # conditions it exists for.
+#
+# The Service carries `port` and NOT the relay range, 61000-65535/udp, which
+# is fixed in the binary (internal/relay). A relayed session's packets arrive
+# on a port from that range at publicIP, so they have to reach this pod there:
+# a node with that public address and the range open to it, which a
+# LoadBalancer does not arrange. This used to offer range values that nothing
+# passed to addy.
 turn:
   enabled: false
   publicIP: ""
   port: 3478
-  # Must not include 51820. The chart refuses a range that does.
-  minPort: 52000
-  maxPort: 65535
+
+# The operator console at /admin. All three or none: addy refuses to start
+# with some of them. The client secret comes from a Secret you create, never
+# from values -- values end up in the release history in plain text.
+#
+#   kubectl create secret generic addy-oidc --from-literal=client-secret=...
+#
+# docs/OPERATOR-SIGNIN.md is how to get the issuer, id and secret.
+oidc:
+  issuer: ""
+  clientID: ""
+  clientSecretName: ""     # a Secret with a `client-secret` key
+  # Who may sign in besides you: invite (default), open or closed.
+  signup: ""
 
 portal:
   enabled: false

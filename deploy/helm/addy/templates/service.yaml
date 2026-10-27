@@ -15,6 +15,11 @@ spec:
   {{- if eq .Values.service.type "LoadBalancer" }}
   externalTrafficPolicy: Local
   {{- end }}
+  # Not-Ready pods are still endpoints, because the one replica is Not Ready
+  # exactly until it has a certificate -- and the ACME HTTP-01 challenge that
+  # gets it one arrives through this Service. Without this the challenge has
+  # nowhere to go and the pod waits for it for ever.
+  publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: {{ include "addy.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}

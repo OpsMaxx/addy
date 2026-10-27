@@ -1,5 +1,23 @@
 # addy — deployment layer
 
+> **Status, 2026-10-27.** Superseded in four places by what shipped; the body
+> below is left as written.
+>
+> - **The TURN relay range is 61000-65535/udp and is not configurable.** It is
+>   `DefaultMinPort`/`DefaultMaxPort` in `internal/relay`, clear of WireGuard's
+>   51820 and of the 32768-60999 the kernel hands to outbound sockets. The
+>   49160-49360 range, `ADDY_TURN_RELAY_MIN`/`MAX` and `--relay-range` below
+>   were never read by the binary and are gone from the installer and compose
+>   file; every firewall instruction says 3478/udp plus 61000-65535/udp.
+> - **The relay runs when `ADDY_TURN_PUBLIC_IP` is set**, which the installer
+>   writes from the IPv4 it detects. Without it there is no relay.
+> - **There is no TURN over TLS.** Nothing listens on 5349; the
+>   `turns:` URL in §4 does not exist.
+> - **The healthcheck is `selftest -quick -connect 127.0.0.1:443`.** It dials
+>   loopback and names the domain, rather than going out through public DNS.
+>   `-quick` checks `/v1/meta` over TLS only; the TURN steps in §4 are not
+>   implemented.
+
 > Research note, 2026-09-17. Everything about Garage below was verified against
 > upstream at tag `v2.4.1` (the pin in `DESIGN.md`) — the published OpenAPI
 > document, the book sources in `doc/book/`, and where behaviour mattered, the

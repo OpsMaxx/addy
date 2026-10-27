@@ -29,7 +29,4 @@ applied rather than as a CrashLoopBackOff somebody has to read logs to explain.
 {{- if and .Values.turn.enabled (not .Values.turn.publicIP) -}}
 {{- fail "turn.enabled needs turn.publicIP. TURN puts that address in the protocol and cannot infer it behind a Service; a relay that guesses allocates addresses nobody can reach, and fails only under the NAT conditions it exists for." -}}
 {{- end -}}
-{{- if and .Values.turn.enabled (and (le (int .Values.turn.minPort) 51820) (ge (int .Values.turn.maxPort) 51820)) -}}
-{{- fail "the TURN relay range includes 51820, which WireGuard uses. Narrow it." -}}
-{{- end -}}
 {{- end -}}

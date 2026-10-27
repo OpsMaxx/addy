@@ -87,7 +87,8 @@ passes the secret as a flag puts it in `/proc/<pid>/cmdline` and in every `ps`
 on the box — which is the thing an `EnvironmentFile` was chosen to avoid. The
 flags still exist and still work; the environment is what you should use.
 
-`/etc/addy.env`, mode `0600`:
+**Installed with `install.sh` (compose).** The three are already in
+`/opt/addy/.env`, empty. Fill them in and recreate the container:
 
 ```
 ADDY_OIDC_ISSUER=https://accounts.google.com
@@ -95,7 +96,27 @@ ADDY_OIDC_CLIENT_ID=<your client id>
 ADDY_OIDC_CLIENT_SECRET=<your client secret>
 ```
 
-`/etc/systemd/system/addy.service`:
+```sh
+cd /opt/addy && docker compose up -d addy
+```
+
+The compose file already runs with `-ui`. `.env` is mode `0600` and the
+installer never rewrites it.
+
+**Helm.** The secret goes in a Secret, not in values, which end up in the
+release history in plain text:
+
+```sh
+kubectl create secret generic addy-oidc --from-literal=client-secret='<your client secret>'
+helm upgrade addy deploy/helm/addy --reuse-values \
+  --set portal.enabled=true \
+  --set oidc.issuer=https://accounts.google.com \
+  --set oidc.clientID='<your client id>' \
+  --set oidc.clientSecretName=addy-oidc
+```
+
+**The binary under systemd.** `/etc/addy.env`, mode `0600`, with the same
+three lines, and `/etc/systemd/system/addy.service`:
 
 ```ini
 [Service]
@@ -133,9 +154,9 @@ only setting under which that request succeeds however it is made.
 
 Whoever claimed the relay is its operator and is not subject to this — §5.
 
-**All three flags or none.** With any of them missing, no admin route exists
-at all and the page says to use the `addy` command — an unconfigured console
-is absent rather than open.
+**All three or none.** With none, no admin route exists at all and the page
+says to use the `addy` command — an unconfigured console is absent rather than
+open. With one or two, addy refuses to start and names the ones missing.
 
 The log line to look for:
 
@@ -164,12 +185,23 @@ not this account"*.
 
 ### If you claim it with the wrong account
 
-The claim is one row. Stop the relay, remove it, restart, and sign in as the
-right account:
+The claim is one row, and `addy unclaim` clears it. Stop the relay first, so
+the wrong account's session ends with it; start it again and sign in as the
+right account straight away:
 
 ```sh
-sqlite3 /path/to/data-dir/addy.db \
-  "DELETE FROM instance WHERE key = 'operator_identity';"
+# compose: the image has no shell, so run the binary in a one-off container
+cd /opt/addy
+docker compose stop addy
+docker compose run --rm --no-deps addy unclaim
+docker compose start addy
+
+# Helm: clear it, then restart the pod to end the session
+kubectl exec <release>-addy-0 -- /addy unclaim
+kubectl delete pod <release>-addy-0
+
+# the binary
+addy unclaim -data /var/lib/addy
 ```
 
 ## 6. A provider that is not Google
@@ -202,7 +234,8 @@ publishes no discovery document.
 | `this relay already has an operator` | Somebody claimed it. If that was you on another account, see §5. |
 | `that sign-in is no longer in progress` | A back button, a bookmarked callback, or a replayed redirect. Start at `/admin` again. |
 | `that issuer does not advertise the endpoints this needs` | The issuer URL is wrong, or the provider is OAuth-only. §6. |
-| The page says no sign-in is configured | Fewer than three `-oidc` flags reached the process. Check the startup log. |
+| The page says no sign-in is configured | None of the three reached the process. Check `.env` (or the unit's `EnvironmentFile`) and that the container was recreated, not just restarted. |
+| addy exits with `operator sign-in is half configured` | One or two of the three are set; the message names the rest. |
 | 404 on `/admin` | `-ui` is off, so the portal serves no pages. |
 
 ## 8. What this does not do

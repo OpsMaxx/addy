@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/opsmaxx/addy/internal/api"
@@ -135,16 +137,14 @@ func (c Config) resolvedHTTPAddr() string {
 func Run(ctx context.Context, cfg Config) error {
 	log := slog.Default()
 
+	if err := cfg.check(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return fmt.Errorf("creating data directory %s: %w", cfg.DataDir, err)
 	}
-	// 0700 whether or not MkdirAll created it. An existing directory keeps its
-	// own mode, and this one holds the roster chain and every device's public
-	// key -- metadata the threat model is explicit about minimising, which
-	// would be undermined by leaving it world-readable because it happened to
-	// pre-exist.
-	if err := os.Chmod(cfg.DataDir, 0o700); err != nil {
-		return fmt.Errorf("securing data directory %s: %w", cfg.DataDir, err)
+	if err := secureDataDir(cfg.DataDir, log); err != nil {
+		return err
 	}
 
 	db, err := store.Open(filepath.Join(cfg.DataDir, "addy.db"))
@@ -286,10 +286,9 @@ func Run(ctx context.Context, cfg Config) error {
 		log.Info("operator portal: sign-in is configured",
 			"issuer", cfg.OIDCIssuer, "redirect", operatorBase+"/admin/callback")
 	} else if cfg.UI {
-		// Said once at startup rather than discovered as a 404. The portal
-		// renders a sign-in button off /admin/v1/me, and an operator who
-		// configured two of the three flags should be told which one is
-		// missing rather than left pressing a button that does nothing.
+		// Said once at startup rather than discovered as a 404. Only the
+		// none-of-three case reaches here: two of three is refused by
+		// Config.check before anything binds.
 		log.Info("operator portal: not configured; administer with the addy command over SSH",
 			"needs", "-oidc-issuer, -oidc-client-id and -oidc-client-secret")
 	}
@@ -363,6 +362,70 @@ func Run(ctx context.Context, cfg Config) error {
 		return nil
 	}
 	return err
+}
+
+// check refuses a configuration that would start and then do nothing useful.
+//
+// Both of these used to run. With no domain outside dev the routing table is
+// empty, so the front door drops every connection and the process looks
+// healthy to everything except a device. With two of the three OIDC settings
+// the console is simply absent, announced by one Info line among the startup
+// noise -- and the operator who set two of them plainly meant to set three.
+// Exiting with the names of what is missing is the cheaper way to find out.
+func (c Config) check() error {
+	if !c.Dev && c.Domain == "" {
+		return errors.New("no domain: set ADDY_DOMAIN or -domain to the hostname devices reach.\n" +
+			"addy answers only for names it was configured for, so without one it refuses every connection")
+	}
+	oidc := []struct{ value, name string }{
+		{c.OIDCIssuer, "ADDY_OIDC_ISSUER"},
+		{c.OIDCClientID, "ADDY_OIDC_CLIENT_ID"},
+		{c.OIDCClientSecret, "ADDY_OIDC_CLIENT_SECRET"},
+	}
+	var set, missing []string
+	for _, o := range oidc {
+		if o.value == "" {
+			missing = append(missing, o.name)
+		} else {
+			set = append(set, o.name)
+		}
+	}
+	if len(set) > 0 && len(missing) > 0 {
+		return fmt.Errorf("operator sign-in is half configured: %s set, %s missing (or the matching -oidc flags).\n"+
+			"Set all three to turn the console on, or none to administer with the addy command",
+			strings.Join(set, ", "), strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// secureDataDir makes the data directory 0700 whether or not MkdirAll created
+// it. An existing directory keeps its own mode, and this one holds the roster
+// chain and every device's public key -- metadata the threat model is explicit
+// about minimising, which would be undermined by leaving it world-readable
+// because it happened to pre-exist.
+//
+// EXCEPT WHEN THIS PROCESS DOES NOT OWN IT, which is the Helm chart's case and
+// not an exotic one: a fresh volume's root is owned by root, the pod runs as
+// 65532, and fsGroup grants the group write access without changing the owner.
+// chmod there is EPERM, and refusing to start over it made the chart crash on
+// its first boot. Inside a pod nobody else is around to read the directory,
+// so a warning that names the mode is the honest outcome; on a shared box the
+// operator who handed addy a directory it does not own can fix the mode.
+func secureDataDir(dir string, log *slog.Logger) error {
+	err := os.Chmod(dir, 0o700)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("securing data directory %s: %w", dir, err)
+	}
+	mode := "unknown"
+	if fi, statErr := os.Stat(dir); statErr == nil {
+		mode = fi.Mode().Perm().String()
+	}
+	log.Warn("the data directory is not owned by this process, so its mode was left as it is",
+		"dir", dir, "mode", mode, "err", err)
+	return nil
 }
 
 // loadRoutes builds the routing table from the database.

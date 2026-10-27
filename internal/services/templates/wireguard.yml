@@ -6,8 +6,8 @@
 # - NET_ADMIN and a sysctl are both required. Without the capability the
 #   container starts and cannot create the interface; without the sysctl it
 #   creates it and forwards nothing, which looks like a client problem.
-# - ${WG_PORT} must not be inside addy's TURN relay range. The default relay
-#   range starts at 52000 precisely so that 51820 is below it.
+# - ${WG_PORT} must not be inside addy's TURN relay range, 61000-65535/udp
+#   (internal/relay). WireGuard's default, 51820, is below it.
 
 services:
   wireguard:

@@ -25,12 +25,14 @@ readable. This is the convention the sibling repo uses for the same purpose.
 Three areas are held to a higher standard than the rest, because nothing below
 them enforces the boundary:
 
-- **`internal/roster/`** — the hash-chained device log is the control that makes
-  the headline claim true. `adversary_test.go` is a deliberately malicious server
-  harness, and a change here that does not extend it is incomplete.
-- **`internal/objects/`** — the object store has no bucket policies, so addy's
-  own authorization layer is the *only* thing between one user's prefix and
-  another's. Every cross-user verb gets its own refusal test.
+- **`internal/protocol/roster.go`** — the hash-chained device log is the
+  control that makes the headline claim true. `roster_adversary_test.go` is a
+  deliberately malicious server harness, and a change here that does not extend
+  it is incomplete.
+- **`internal/api/` and `internal/store/`** — objects are stored per account
+  with no bucket policies underneath, so addy's own authorization layer is the
+  *only* thing between one account's objects and another's. Every cross-account
+  verb gets its own refusal test in `internal/api/isolation_test.go`.
 - **`internal/pair/`** — the SPAKE2 implementation is vendored and reviewed as
   our own code. Treat a change to it as a change to cryptography, not to a
   dependency.

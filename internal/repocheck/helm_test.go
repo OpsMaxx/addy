@@ -63,14 +63,17 @@ func TestTheChartParses(t *testing.T) {
 	}
 }
 
-// The three refusals, which fail a release BEFORE anything is applied rather
-// than as a CrashLoopBackOff somebody has to read logs to explain.
-func TestTheChartRefusesTheThreeThingsItShould(t *testing.T) {
+// The refusals, which fail a release BEFORE anything is applied rather than as
+// a CrashLoopBackOff somebody has to read logs to explain.
+//
+// There were three. The third refused a TURN range containing 51820 -- for
+// minPort/maxPort values the chart never passed to addy, which allocates from
+// its own fixed range. A guard on a setting that does nothing is not a guard.
+func TestTheChartRefusesTheThingsItShould(t *testing.T) {
 	helpers := readChartFile(t, "templates", "_helpers.tpl")
 	for _, want := range []struct{ needle, why string }{
 		{"addy needs a domain", "a release with no domain"},
 		{"turn.enabled needs turn.publicIP", "a relay that would advertise an address it cannot know"},
-		{"51820", "a TURN range that collides with WireGuard"},
 	} {
 		if !strings.Contains(helpers, want.needle) {
 			t.Errorf("the chart no longer refuses %s", want.why)
@@ -116,16 +119,60 @@ func TestTheChartDoesNotQuietlyGiveUpTheRouting(t *testing.T) {
 	}
 }
 
-// The liveness probe has to prove the instance ANSWERS, not that the process
-// is up. A relay that is running and cannot serve is the worst first
-// impression the product can make, and "the container is running" is exactly
-// the evidence that produces it.
-func TestTheProbesUseSelftest(t *testing.T) {
+// Readiness has to prove the instance ANSWERS FOR ITS DOMAIN, not that the
+// process is up -- and it has to be able to pass.
+//
+// Both probes used to run `selftest -quick -target localhost:443`. The front
+// door drops every name it has no route for, localhost included outside dev,
+// so the pod was never Ready and the liveness probe restarted it for ever.
+func TestTheProbesCanPass(t *testing.T) {
 	sts := readChartFile(t, "templates", "statefulset.yaml")
-	if strings.Count(sts, "selftest") < 2 {
-		t.Error("liveness and readiness do not both run `addy selftest -quick`")
+	var probes struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Liveness  map[string]any `yaml:"livenessProbe"`
+						Readiness struct {
+							Exec struct {
+								Command []string `yaml:"command"`
+							} `yaml:"exec"`
+						} `yaml:"readinessProbe"`
+					} `yaml:"containers"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
 	}
-	if !strings.Contains(sts, "-quick") {
-		t.Error("the probes run a full selftest; -quick is what a 30-second probe should run")
+	// The template directives are not YAML; drop those lines, keep the rest.
+	var plain []string
+	for _, line := range strings.Split(sts, "\n") {
+		if !strings.Contains(line, "{{") {
+			plain = append(plain, line)
+		}
+	}
+	if err := yaml.Unmarshal([]byte(strings.Join(plain, "\n")), &probes); err != nil {
+		t.Fatalf("statefulset.yaml without its directives: %v", err)
+	}
+	c := probes.Spec.Template.Spec.Containers[0]
+
+	cmd := strings.Join(c.Readiness.Exec.Command, " ")
+	if !strings.Contains(cmd, "selftest -quick") {
+		t.Errorf("readiness runs %q; it should run `addy selftest -quick`", cmd)
+	}
+	if strings.Contains(cmd, "localhost") || !strings.Contains(cmd, "-connect 127.0.0.1:443") {
+		t.Errorf("readiness runs %q; it must dial loopback and name the domain, which the front door answers for", cmd)
+	}
+	// Liveness must not depend on a certificate existing, or a slow first
+	// issuance restarts the pod mid-order.
+	if _, ok := c.Liveness["tcpSocket"]; !ok {
+		t.Errorf("liveness is %v; anything that needs TLS restarts the pod before its certificate is issued", c.Liveness)
+	}
+	// And Not Ready must still receive the ACME challenge.
+	if !strings.Contains(readChartFile(t, "templates", "service.yaml"), "publishNotReadyAddresses: true") {
+		t.Error("the Service drops Not-Ready pods, so the challenge that would make the pod Ready never arrives")
+	}
+	// The probes find the domain in the environment.
+	if !strings.Contains(sts, "name: ADDY_DOMAIN") {
+		t.Error("ADDY_DOMAIN is not in the pod's environment, so the probe has no name to send")
 	}
 }
