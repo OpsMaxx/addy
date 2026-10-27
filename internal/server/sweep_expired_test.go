@@ -70,3 +70,46 @@ func TestExpiredMailAndPastesAreSwept(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Transfer bytes nobody can name any more (the notice expired, or the
+// receiver could not open it) were kept against the account's quota for ever.
+// Fresh ones, and every other object, stay.
+func TestUncollectedTransferBytesAreSwept(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "addy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	const account = "b4e6cf2a2b3e9370f642957d57952c89"
+	token, err := db.NewInvite(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateAccount(ctx, account, bytes.Repeat([]byte{1}, 32), token); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"transfer:old", "transfer:fresh", "servers"} {
+		if _, err := db.PutObject(ctx, account, store.Object{Name: name, Epoch: 1, Counter: 1, Body: []byte("x")}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-store.MailboxTTL - 25*time.Hour).Unix()
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE objects SET updated_at = ? WHERE name IN ('transfer:old', 'servers')`, old)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := db.SweepTransfers(ctx, store.MailboxTTL+24*time.Hour)
+	if err != nil || n != 1 {
+		t.Fatalf("swept %d (%v), want exactly the old transfer", n, err)
+	}
+	if _, err := db.GetObject(ctx, account, "transfer:fresh", 1); err != nil {
+		t.Fatalf("a fresh transfer was swept: %v", err)
+	}
+	if _, err := db.GetObject(ctx, account, "servers", 1); err != nil {
+		t.Fatalf("an old non-transfer object was swept: %v", err)
+	}
+}

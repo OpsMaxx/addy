@@ -398,6 +398,30 @@ func (d *DB) DeleteObject(ctx context.Context, accountID, name string, epoch *ui
 	})
 }
 
+// SweepTransfers drops file-transfer objects (`transfer:<id>`) older than
+// the mailbox's own lifetime.
+//
+// A transfer's bytes are deleted by the receiver once it has the file, and the
+// id that names them travels only inside the sealed notice. When the notice
+// cannot be opened -- it expired, or it came from an OpsMaxx version the
+// receiver cannot read -- nobody knows the id, nothing ever deletes the bytes,
+// and they count against the account's quota for ever. Past the mailbox TTL no
+// notice that could name them still exists, so nothing can collect them.
+func (d *DB) SweepTransfers(ctx context.Context, age time.Duration) (int64, error) {
+	var n int64
+	err := d.Tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM objects WHERE name LIKE 'transfer:%' AND updated_at <= ?`,
+			time.Now().Add(-age).Unix()) // objects.updated_at is in seconds
+		if err != nil {
+			return err
+		}
+		n, _ = res.RowsAffected()
+		return nil
+	})
+	return n, err
+}
+
 // NewInvite mints a token and stores only its hash.
 //
 // THE PLAINTEXT TOKEN IS RETURNED ONCE AND NEVER STORED. A database that holds

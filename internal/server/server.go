@@ -404,6 +404,11 @@ func sweepExpired(ctx context.Context, db *store.DB, log *slog.Logger, every tim
 		for name, sweep := range map[string]func(context.Context) (int64, error){
 			"mailbox": db.SweepMailbox,
 			"pastes":  db.SweepPastes,
+			// A day past the mailbox TTL, so a notice still in its window can
+			// always find its bytes.
+			"transfers": func(ctx context.Context) (int64, error) {
+				return db.SweepTransfers(ctx, store.MailboxTTL+24*time.Hour)
+			},
 		} {
 			if n, err := sweep(ctx); err != nil && ctx.Err() == nil {
 				log.Warn("sweeping expired rows failed", "table", name, "err", err)
