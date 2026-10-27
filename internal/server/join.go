@@ -25,11 +25,12 @@ import (
 //     are adding is the box whose portal printed this string -- which matters,
 //     because the alternative is trusting whatever answers a hostname a human
 //     typed.
-//   - It is NOT a long-lived certificate pin. certmagic generates a new key on
-//     renewal, so the pin changes roughly every sixty days. A join string is
-//     one-shot by nature -- it is used once to add an instance -- so this is a
-//     property to state, not a problem to solve. A stale string is refused and
-//     the operator prints a new one.
+//   - It outlives a renewal. The front door sets certmagic's ReusePrivateKeys,
+//     so a renewed certificate carries the same key and the same pin -- which
+//     matters because devices keep this pin and sign over it at every login.
+//     It changes when the key does: `addy panic` without -keep-certs, or a
+//     lost data volume. A string printed before either is refused, and the
+//     operator prints a new one.
 //   - It is NOT what secures the account. After pairing, the roster and the
 //     account key are what identify anything, and the TLS layer is transport.
 //
