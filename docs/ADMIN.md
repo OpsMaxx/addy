@@ -104,12 +104,22 @@ file and restarts; `ADDY_VERSION=0.2.0` picks a version instead of `latest`.
 By hand it is `docker compose pull && docker compose up -d` in `/opt/addy`,
 which keeps the old compose file. On Kubernetes, `helm upgrade` with the new
 `image.tag`. Versions are written without a `v`: the image is `0.2.0`, the git
-tag `v0.2.0`.
+tag `v0.2.0`. If the package at `ghcr.io/opsmaxx/addy` is private -- it starts
+that way when the repository is -- every pull needs `docker login ghcr.io`
+first (on Kubernetes, an `imagePullSecret`).
 
 **What addy keeps for you.** Before it changes the database's schema, addy
 copies the database to `addy.db.schema-<N>.<time>.bak` beside it, where `<N>`
-is the schema the copy has -- the one the previous release opens. Nothing
-deletes these; clear old ones out once a release has run for a while.
+is the schema the copy has -- the one the previous release opens. The copy is
+the whole database, objects included, so:
+
+- addy checks first that the volume has room for it, and if not, refuses to
+  start with the numbers and changes nothing. Grow the volume, or run the
+  previous release until you can.
+- Nothing listens until the copy is done. On Kubernetes the startup probe
+  allows fifteen minutes for that.
+- Only the newest three copies are kept; each upgrade that makes a fourth
+  deletes the oldest. Copy out any you want to keep longer.
 
 **Backing up.** Stop it, copy the directory out, start it. `docker cp` works on
 a stopped container, and the image has no shell, so this is the way in:
@@ -147,9 +157,30 @@ docker compose up -d addy
 ```
 
 `addy_addy-state` is the volume compose made: the project takes its name from
-the directory, `/opt/addy`. On Kubernetes the same files are on the claim:
-scale the StatefulSet to zero, mount the claim in a throwaway pod to do the
-same moves, then `helm upgrade` with the previous `image.tag`.
+the directory, `/opt/addy`. Compose runs addy as root, so a root-owned
+database is right there.
+
+**On Kubernetes the pod runs as uid 65532**, and a database put back as root
+with mode 0600 is one addy cannot open -- the pod crash-loops. So the
+throwaway pod that does the moves runs as 65532 too:
+
+```sh
+kubectl scale statefulset <release>-addy --replicas=0
+kubectl run addy-rollback --rm -it --restart=Never --image=busybox --overrides='{"spec":{
+  "securityContext":{"runAsUser":65532,"runAsGroup":65532,"fsGroup":65532},
+  "volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"data-<release>-addy-0"}}],
+  "containers":[{"name":"addy-rollback","image":"busybox","stdin":true,"tty":true,
+    "command":["sh"],"volumeMounts":[{"name":"data","mountPath":"/data"}]}]}}'
+# In that shell -- the same moves as above, as the uid addy runs as:
+cd /data && ls -l
+mkdir -p replaced && mv addy.db addy.db-wal addy.db-shm replaced/ 2>/dev/null
+cp addy.db.schema-N.TIME.bak addy.db && chmod 600 addy.db
+ls -ln addy.db     # owner must be 65532
+exit
+# The previous release, then back to one replica.
+helm upgrade <release> deploy/helm/addy --reuse-values --set image.tag=0.1.0
+kubectl scale statefulset <release>-addy --replicas=1
+```
 
 When the upgrade did not change the schema there is no copy, and none is
 needed: the previous version opens the database as it is.

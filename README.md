@@ -9,9 +9,20 @@ set of self-hosted services.
 by invite, the signed device roster, sealed-object sync with conflict keeping,
 store-and-forward mail, pairing, an embedded TURN relay, one-time pastes, its
 own TLS front door with ACME, and an optional operator console at `/admin`.
-OpsMaxx's *Sync & devices* page is its client. No version has been tagged, so
-there is no published image or binary yet: build from source with
-`scripts/build.sh`, or try it locally with `go run ./cmd/addy serve -dev`.
+OpsMaxx's *Sync & devices* page is its client.
+
+Each release tag publishes the image at `ghcr.io/opsmaxx/addy:<version>`
+(and `:latest` for a non-prerelease), binaries for five platforms, and the
+compose bundle the installer fetches -- which is what the install paths below
+pull. **No version has been tagged yet**, so until one is, build from source
+with `scripts/build.sh`, or try it locally with `go run ./cmd/addy serve -dev`.
+
+> While this repository is private, so is what it publishes: a GHCR package
+> pushed from a private repository starts private, and private release files
+> need a token. Pulling then needs `docker login ghcr.io` with a token that can
+> read the package, and the installer's bundle download fails. Making the
+> package public is a setting on the package, and a decision for whoever owns
+> it.
 
 `docs/DESIGN.md` is the design of record, including the corrections an
 adversarial review forced before a line of code existed. Where the code

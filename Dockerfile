@@ -26,12 +26,17 @@ ARG BUILD_SHA=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -buildid= -X main.Version=${VERSION} -X main.BuildSha=${BUILD_SHA}" \
       -o /addy ./cmd/addy
+# scratch has no /tmp, and `addy preflight` keeps its throwaway ACME account in
+# one. Sticky and world-writable like any /tmp, so it works as root under
+# compose and as uid 65532 under the chart.
+RUN mkdir -m 1777 /tmp-for-scratch
 
 FROM scratch
 # CA roots, so the ACME client can verify the CA it is talking to. Without this
 # every ACME order fails with an x509 error that reads like a clock problem.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /addy /addy
+COPY --from=build /tmp-for-scratch /tmp
 
 # addy binds 80 and 443, which on Linux needs either root or
 # CAP_NET_BIND_SERVICE. The compose file runs it host-networked as root; a
@@ -39,8 +44,9 @@ COPY --from=build /addy /addy
 #
 # TURN is 3478/udp plus the relay range 61000-65535/udp (internal/relay), and
 # nothing else: TURN over TLS is not implemented, and the EXPOSE for its port
-# told every reader there was something listening there. The range is not EXPOSEd either
-# -- the compose file is host-networked, so EXPOSE does nothing for it.
+# told every reader there was something listening there. The range is not
+# EXPOSEd either -- the compose file is host-networked, so EXPOSE does nothing
+# for it.
 EXPOSE 80 443 3478/udp
 VOLUME ["/var/lib/addy"]
 ENTRYPOINT ["/addy"]

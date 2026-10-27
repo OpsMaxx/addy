@@ -65,7 +65,14 @@ this again`, err)
 
 	dir, err := os.MkdirTemp("", "addy-preflight-*")
 	if err != nil {
-		return fmt.Errorf("creating a scratch directory: %w", err)
+		// Said as what it is. The installer used to report every preflight
+		// failure as an unreachable port 80, and this one -- a container
+		// image with no /tmp -- sent operators to their provider's firewall.
+		return fmt.Errorf(`preflight could not create a scratch directory: %w
+
+This is about where preflight is running, not about the network: nothing
+has been sent to a CA. It needs a writable temporary directory -- /tmp, or
+wherever TMPDIR points`, err)
 	}
 	defer os.RemoveAll(dir)
 

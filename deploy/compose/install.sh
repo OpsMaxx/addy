@@ -28,7 +28,10 @@
 set -eu
 
 ADDY_INSTALLER_URL="${ADDY_INSTALLER_URL:-https://get.opsmaxx.dev/addy/install.sh}"
-ADDY_BUNDLE_URL="${ADDY_BUNDLE_URL:-https://get.opsmaxx.dev/addy}"
+# Where the compose bundle comes from. Empty means the GitHub release matching
+# ADDY_VERSION -- see fetch_bundle.
+ADDY_BUNDLE_URL="${ADDY_BUNDLE_URL:-}"
+ADDY_RELEASES="${ADDY_RELEASES:-https://github.com/OpsMaxx/addy/releases}"
 
 # The re-exec is UNCONDITIONAL, not "only when piped". Running this as
 # `sh install.sh` from a file skips the pipe case but still leaves dash
@@ -212,16 +215,38 @@ public_ip() {  # $1 = -4 or -6
     | awk -F= '/^ip=/ {print $2}'
 }
 
+# Prints the A or AAAA addresses, one per line, and NOTHING ELSE. The answer
+# also carries the CNAME chain, whose "data" is a hostname: collected along
+# with the addresses, it made every CNAME'd domain look as if it had an AAAA
+# record, and the AAAA check below refused IPv4-only boxes over it. So only
+# records of the asked-for type count -- 1 for A, 28 for AAAA.
+#
+# An empty answer SUCCEEDS. "No AAAA record" is an answer, not a failure, and
+# reporting it as one sent a plain IPv4-only domain through four retries and
+# over a minute of "failed (attempt n of 4)". Only curl failing is a failure.
 doh_resolve() { # $1 = name, $2 = A|AAAA
-  curl -fsS --max-time 10 -H 'accept: application/dns-json' \
-    "https://dns.google/resolve?name=$1&type=$2" \
-    | grep -o "\"data\":\"[^\"]*\"" | cut -d'"' -f4
+  local type=1 body
+  [ "$2" = AAAA ] && type=28
+  body="$(curl -fsS --max-time 10 -H 'accept: application/dns-json' \
+    "https://dns.google/resolve?name=$1&type=$2")" || return 1
+  printf '%s' "$body" | grep -o "\"type\":$type,[^}]*\"data\":\"[^\"]*\"" \
+    | grep -o '"data":"[^"]*"' | cut -d'"' -f4 || true
+}
+
+# Whether this box has an IPv6 default route. Without one, asking for its
+# public IPv6 address can only fail, and retrying it only takes longer to.
+# A box with no `ip` command is asked anyway.
+has_ipv6_route() {
+  command -v ip >/dev/null 2>&1 || return 0
+  [ -n "$(ip -6 route show default 2>/dev/null)" ]
 }
 
 check_dns() {
-  local domain="$1" v4 v6 a aaaa
+  local domain="$1" v4 v6="" a aaaa
   v4="$(retry_network "detecting public IPv4" public_ip -4 || true)"
-  v6="$(retry_network "detecting public IPv6" public_ip -6 || true)"
+  if has_ipv6_route; then
+    v6="$(retry_network "detecting public IPv6" public_ip -6 || true)"
+  fi
   [ -n "$v4$v6" ] || refuse \
     "Could not determine this box's public IP address." \
     "Check that outbound HTTPS works, then re-run."
@@ -289,31 +314,49 @@ docker's error above says which of these it is:
 check_acme_reachable() {
   local domain="$1"
   log "proving port 80 is reachable from the internet (a real staging order)"
-  # Host-networked, so it really binds this box's port 80.
-  if ! docker run --rm --network host "$ADDY_IMAGE" \
+  # Host-networked, so it really binds this box's port 80. --tmpfs because
+  # preflight keeps a throwaway ACME account in /tmp, which images before the
+  # Dockerfile created one did not have.
+  if ! docker run --rm --network host --tmpfs /tmp "$ADDY_IMAGE" \
         preflight -domain "$domain"; then
+    # preflight's own message, above, is the diagnosis: it says whether it
+    # could not bind :80, could not resolve the name, could not even start, or
+    # ordered a certificate and the CA could not reach it. This used to
+    # replace all four with "your firewall", which was wrong for three.
     refuse \
-"An ACME challenge for $domain did not complete. Port 80 has to be reachable
-from the internet, and this box cannot see why it is not.
+"addy preflight did not pass for $domain. Its reason is printed above.
 
-The two causes a shell here cannot detect:
-  * the VPS PROVIDER's firewall, which is a separate layer from the host's and
-    lives in their control panel, not here -- AWS security groups, Hetzner
-    Cloud firewalls, DigitalOcean cloud firewalls, and Oracle Cloud's
-    default-deny ingress are the four that come up most;
-  * a network appliance in front of the box." \
-      "Allow inbound TCP 80 and 443 in the provider's firewall as well as the host's, then re-run."
+If the reason is a failed staging order, the cause a shell here cannot see
+is usually the VPS PROVIDER's firewall, a separate layer from this host's
+that lives in their control panel -- AWS security groups, Hetzner Cloud
+firewalls, DigitalOcean cloud firewalls and Oracle Cloud's default-deny
+ingress come up most -- or a network appliance in front of the box." \
+      "Fix what preflight named, then re-run. Nothing has been installed."
   fi
 }
 
 # --- install ---------------------------------------------------------------
 
+# THE COMPOSE FILE MATCHING THE IMAGE. Each release carries its own
+# docker-compose.yml and garage.toml as release files, so a box pinned to
+# ADDY_VERSION=0.1.0 gets 0.1.0's compose file. This used to fetch one
+# unversioned bundle whatever the version, so pinning an older release paired
+# it with the newest compose file -- environment and flags it might not know.
 fetch_bundle() {
   mkdir -p "$INSTALL_DIR"
-  local f
+  local f base="$ADDY_BUNDLE_URL"
+  if [ -z "$base" ]; then
+    if [ "$ADDY_VERSION" = latest ]; then
+      base="$ADDY_RELEASES/latest/download"
+    else
+      base="$ADDY_RELEASES/download/v$ADDY_VERSION"
+    fi
+  fi
   for f in docker-compose.yml garage.toml; do
     retry_network "downloading $f" \
-      curl -fsSL "$ADDY_BUNDLE_URL/$f" -o "$INSTALL_DIR/$f.new"
+      curl -fsSL "$base/$f" -o "$INSTALL_DIR/$f.new" || refuse \
+      "Could not download $f from $base." \
+      "Check that release exists. A private repository's release files need a token; ADDY_BUNDLE_URL points the installer at a copy you host instead."
     mv "$INSTALL_DIR/$f.new" "$INSTALL_DIR/$f"
   done
   chmod 644 "$INSTALL_DIR/garage.toml"
@@ -472,6 +515,17 @@ upgrade() {
   check_docker
   log "upgrading the addy at $INSTALL_DIR ($domain)"
 
+  # An .env from before the relay could be configured has no public IP in it,
+  # and so no relay. Detected and added once; an existing value -- empty
+  # included -- is the operator's and is left alone.
+  if grep -q '^ADDY_TURN_PUBLIC_IP=' "$env_file"; then
+    PUBLIC_V4="$(sed -n 's/^ADDY_TURN_PUBLIC_IP=//p' "$env_file")"
+  else
+    PUBLIC_V4="$(retry_network "detecting public IPv4" public_ip -4 || true)"
+    printf '\nADDY_TURN_PUBLIC_IP=%s\n' "$PUBLIC_V4" >> "$env_file"
+    log "added ADDY_TURN_PUBLIC_IP=$PUBLIC_V4 to $env_file"
+  fi
+
   if [ -n "$ADDY_VERSION_ASKED" ]; then
     sed -i "s/^ADDY_VERSION=.*/ADDY_VERSION=$ADDY_VERSION/" "$env_file"
   else
@@ -485,6 +539,8 @@ upgrade() {
   verify "$domain"
   log "upgraded to $(docker exec addy /addy version)"
   log "Rolling back: docs/ADMIN.md, \"Upgrades, backups and rollback\"."
+  echo
+  turn_advice
 }
 
 finished() {
@@ -499,6 +555,10 @@ finished() {
   echo "give it https://$domain and the invite. Every device after that is added by"
   echo "pairing with the first and needs no invite."
   echo
+  turn_advice
+}
+
+turn_advice() {
   if [ -n "$PUBLIC_V4" ]; then
     echo "The TURN relay advertises $PUBLIC_V4. Open ${ADDY_TURN_PORT}/udp and"
     echo "${ADDY_RELAY_MIN}-${ADDY_RELAY_MAX}/udp inbound in the provider's firewall as well as"
