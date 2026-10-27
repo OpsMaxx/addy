@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -336,20 +339,81 @@ func (d *DB) migrate(ctx context.Context) error {
 // Only when there is something to lose and something about to change: a
 // fresh database has nothing in it, and an unchanged schema needs no undo.
 // Named by the schema it holds and the time it was taken, so the copy says
-// which binary can open it and a second upgrade never overwrites the first.
-// Nothing deletes them; ADMIN.md says how to roll back with one, and how to
-// clear them out.
+// which binary can open it.
+//
+// The copy is the WHOLE database, objects included, which is most of it. So:
+//
+//   - Free space is checked first, and a volume too small for the copy is
+//     refused with the numbers rather than filled. On the chart's 5Gi claim a
+//     database past half of it cannot be copied at all.
+//   - It is written under a .partial name and renamed only once complete. A
+//     process killed mid-copy -- by a probe, by an operator -- leaves a
+//     .partial, which the next start deletes rather than mistaking for a
+//     backup.
+//   - Only the newest keepSnapshots are kept. Each upgrade adds one the size
+//     of the database, and an unbounded pile of them is the next full disk.
 func (d *DB) snapshot(ctx context.Context, version int) error {
+	stale, _ := filepath.Glob(d.path + ".schema-*.partial")
+	for _, p := range stale {
+		_ = os.Remove(p)
+	}
+
+	need := fileSize(d.path) + fileSize(d.path+"-wal")
+	if free, ok := freeSpace(filepath.Dir(d.path)); ok && free < need+need/10 {
+		return fmt.Errorf("the database is at schema version %d and this release changes it, "+
+			"which needs a copy of it first: about %d MB, and %s has %d MB free.\n"+
+			"Nothing was changed. Grow the volume, or free space on it, and start again -- "+
+			"or run the previous release, which opens this database as it is",
+			version, need>>20, filepath.Dir(d.path), free>>20)
+	}
+
 	dest := fmt.Sprintf("%s.schema-%d.%s.bak", d.path, version, time.Now().UTC().Format("20060102T150405Z"))
-	if _, err := d.write.ExecContext(ctx, "VACUUM INTO ?", dest); err != nil {
-		return fmt.Errorf("copying the database to %s before upgrading its schema from version %d: %w\n"+
+	partial := strings.TrimSuffix(dest, ".bak") + ".partial"
+	if _, err := d.write.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("copying the database before upgrading its schema from version %d: %w\n"+
 			"Nothing was changed. Free some space on the data volume, or move the database aside yourself, and start again",
-			dest, version, err)
+			version, err)
 	}
 	// The same 0600 as the database it copies, for the same reasons -- see
 	// restrict.
-	if err := os.Chmod(dest, 0o600); err != nil {
-		return fmt.Errorf("securing %s: %w", dest, err)
+	if err := os.Chmod(partial, 0o600); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("securing %s: %w", partial, err)
 	}
+	if err := os.Rename(partial, dest); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("naming the copy %s: %w", dest, err)
+	}
+	pruneSnapshots(d.path)
 	return nil
+}
+
+// keepSnapshots is how many pre-upgrade copies survive. Three is the last
+// upgrade and the two before it: enough to step back through a bad release
+// and the one that exposed it, without keeping one per release for ever.
+const keepSnapshots = 3
+
+// pruneSnapshots deletes all but the newest keepSnapshots copies. Best effort:
+// a copy that will not delete is a full disk later, not a failed upgrade now.
+func pruneSnapshots(db string) {
+	copies, _ := filepath.Glob(db + ".schema-*.bak")
+	sort.Slice(copies, func(i, j int) bool { return modTime(copies[i]).After(modTime(copies[j])) })
+	for i := keepSnapshots; i < len(copies); i++ {
+		_ = os.Remove(copies[i])
+	}
+}
+
+func fileSize(path string) int64 {
+	if fi, err := os.Stat(path); err == nil {
+		return fi.Size()
+	}
+	return 0
+}
+
+func modTime(path string) time.Time {
+	if fi, err := os.Stat(path); err == nil {
+		return fi.ModTime()
+	}
+	return time.Time{}
 }
