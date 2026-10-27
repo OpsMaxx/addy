@@ -381,42 +381,10 @@ func VerifyChain(raw []byte, acct AccountID, rootSignPub ed25519.PublicKey, epoc
 		}
 
 		// Step 10: op semantics.
-		switch e.Op {
-		case OpAdd:
-			if len(e.LabelCT) == 0 {
-				return nil, fmt.Errorf("%w: entry %d adds a device with no label", ErrBadOp, i)
-			}
-			if indexOfDevice(devices, e.PubSign) >= 0 {
-				// Re-adding a live device is either a bug or an attempt to
-				// change its pub_enc.
-				return nil, fmt.Errorf("%w: entry %d re-adds a device that is already present", ErrBadOp, i)
-			}
-			devices = append(devices, Device{
-				PubSign: e.PubSign, PubEnc: e.PubEnc, LabelCT: e.LabelCT,
-				Epoch: e.Epoch, AddedBy: e.Signer, Flags: e.Flags,
-			})
-
-		case OpRevoke:
-			if len(e.LabelCT) != 0 {
-				// There is nothing to name, so a payload here is a covert
-				// channel in bytes the server stores verbatim.
-				return nil, fmt.Errorf("%w: entry %d is a revoke carrying a label", ErrBadOp, i)
-			}
-			at := indexOfDevice(devices, e.PubSign)
-			if at < 0 {
-				return nil, fmt.Errorf("%w: entry %d revokes a device that is not present", ErrBadOp, i)
-			}
-			// A revoke naming a substituted pub_enc is refused: it would
-			// otherwise be a way to rewrite a live device's encryption key.
-			if !bytes.Equal(devices[at].PubEnc, e.PubEnc) {
-				return nil, fmt.Errorf("%w: entry %d revokes a device with a substituted encryption key", ErrBadOp, i)
-			}
-			devices = append(devices[:at], devices[at+1:]...)
-
-		case OpEpoch:
-			if len(e.LabelCT) != 0 {
-				return nil, fmt.Errorf("%w: entry %d is a transition carrying a label", ErrBadOp, i)
-			}
+		if devices, err = applyOp(devices, e, i); err != nil {
+			return nil, err
+		}
+		if e.Op == OpEpoch {
 			epochSign[e.Epoch] = ed25519.PublicKey(e.PubSign)
 			epochEnc[e.Epoch] = e.PubEnc
 		}
@@ -457,6 +425,102 @@ func VerifyChain(raw []byte, acct AccountID, rootSignPub ed25519.PublicKey, epoc
 		EpochEnc:  epochEnc[currentEpoch],
 		Entries:   len(entries),
 	}, nil
+}
+
+// applyOp is step 10: what an entry does to the device set, and the rules on
+// its shape that need no key to check.
+//
+// ONE COPY, shared by VerifyChain and Members, so the relay's idea of who is on
+// a roster and every client's are computed by the same lines rather than by two
+// that drift.
+func applyOp(devices []Device, e Entry, i int) ([]Device, error) {
+	switch e.Op {
+	case OpAdd:
+		if len(e.LabelCT) == 0 {
+			return nil, fmt.Errorf("%w: entry %d adds a device with no label", ErrBadOp, i)
+		}
+		if indexOfDevice(devices, e.PubSign) >= 0 {
+			// Re-adding a live device is either a bug or an attempt to
+			// change its pub_enc.
+			return nil, fmt.Errorf("%w: entry %d re-adds a device that is already present", ErrBadOp, i)
+		}
+		return append(devices, Device{
+			PubSign: e.PubSign, PubEnc: e.PubEnc, LabelCT: e.LabelCT,
+			Epoch: e.Epoch, AddedBy: e.Signer, Flags: e.Flags,
+		}), nil
+
+	case OpRevoke:
+		if len(e.LabelCT) != 0 {
+			// There is nothing to name, so a payload here is a covert
+			// channel in bytes the server stores verbatim.
+			return nil, fmt.Errorf("%w: entry %d is a revoke carrying a label", ErrBadOp, i)
+		}
+		at := indexOfDevice(devices, e.PubSign)
+		if at < 0 {
+			return nil, fmt.Errorf("%w: entry %d revokes a device that is not present", ErrBadOp, i)
+		}
+		// A revoke naming a substituted pub_enc is refused: it would
+		// otherwise be a way to rewrite a live device's encryption key.
+		if !bytes.Equal(devices[at].PubEnc, e.PubEnc) {
+			return nil, fmt.Errorf("%w: entry %d revokes a device with a substituted encryption key", ErrBadOp, i)
+		}
+		return append(devices[:at], devices[at+1:]...), nil
+
+	case OpEpoch:
+		if len(e.LabelCT) != 0 {
+			return nil, fmt.Errorf("%w: entry %d is a transition carrying a label", ErrBadOp, i)
+		}
+	}
+	return devices, nil
+}
+
+// Members is the device set a stored chain names, and the keys it removed,
+// WITHOUT VERIFYING A SIGNATURE.
+//
+// FOR THE RELAY, AND NEVER FOR A CLIENT. The relay cannot run VerifyChain: the
+// genesis entry is signed by AK_1, whose public half no chain contains, so it
+// has no key to check epoch 1 against. What it can check without a key it
+// does -- parsing, account binding, sequence, link, and the add and revoke
+// rules of step 10 -- so the set it derives is the one an honest client derives
+// from the same bytes. What stops a forger choosing that set is that the relay
+// takes appends only from devices already in it. A client trusting this would
+// be trusting whoever wrote the bytes.
+//
+// An empty chain names nobody and is not an error: the relay is asked about
+// accounts that do not exist, and must not answer differently for them.
+func Members(raw []byte, acct AccountID) (devices []Device, removed [][]byte, err error) {
+	var added [][]byte
+	var prev []byte
+	for i := 0; len(raw) > 0; i++ {
+		var e Entry
+		if e, raw, err = DecodeEntry(raw); err != nil {
+			return nil, nil, fmt.Errorf("roster: entry %d: %w", i, err)
+		}
+		if e.AccountID != acct {
+			return nil, nil, fmt.Errorf("%w: entry %d", ErrWrongAccount, i)
+		}
+		if e.Seq != uint64(i) {
+			return nil, nil, fmt.Errorf("%w: entry %d carries seq %d", ErrBadSequence, i, e.Seq)
+		}
+		if i > 0 && !bytes.Equal(e.PrevHash, prev) {
+			return nil, nil, fmt.Errorf("%w: entry %d", ErrBrokenLink, i)
+		}
+		if devices, err = applyOp(devices, e, i); err != nil {
+			return nil, nil, err
+		}
+		if e.Op == OpAdd {
+			added = append(added, e.PubSign)
+		}
+		if prev, err = e.Hash(); err != nil {
+			return nil, nil, fmt.Errorf("roster: entry %d: %w", i, err)
+		}
+	}
+	for _, k := range added {
+		if indexOfDevice(devices, k) < 0 {
+			removed = append(removed, k)
+		}
+	}
+	return devices, removed, nil
 }
 
 func indexOfDevice(devices []Device, pubSign []byte) int {

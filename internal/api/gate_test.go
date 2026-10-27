@@ -227,11 +227,20 @@ func TestM1Gate(t *testing.T) {
 	stranger.Account = acct.Root.AccountID
 	stranger.Device = third
 
-	// It can log in -- the server authenticates a key, and cannot verify a
-	// roster it has no key for. What it CANNOT do is appear in the chain the
-	// other devices verify, which is the guarantee that actually matters: a
-	// device the roster does not name is a device nothing is sealed to.
-	_ = stranger.Login()
+	// It can log in, but only to the calls a device recovering from the phrase
+	// needs; the server reads the roster, finds no such key, and serves it
+	// nothing else. This test used to assert the opposite -- "the server
+	// authenticates a key, and cannot verify a roster it has no key for" --
+	// and that session could write objects and append to the chain.
+	if err := stranger.Login(); err != nil {
+		t.Fatalf("a stranger's limited login: %v", err)
+	}
+	if _, err := stranger.PutObject("servers", 1, 1, []byte("x"), ""); err == nil {
+		t.Fatal("a device nobody added wrote an object")
+	}
+	if _, err := stranger.GetObject("servers", 1); err == nil {
+		t.Fatal("a device nobody added read an object")
+	}
 	v2, err := joining.Roster(
 		acct.Root.Sign.Public().(ed25519.PublicKey),
 		acct.Epoch.Sign.Public().(ed25519.PublicKey), nil)

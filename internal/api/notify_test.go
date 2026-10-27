@@ -23,12 +23,7 @@ func TestAChangeOnOneDeviceReachesTheOther(t *testing.T) {
 	}
 
 	// A second device of the same account.
-	b := client.New(srv.URL, true)
-	b.Account = acct.Root.AccountID
-	b.Device = mustDevice(t)
-	if err := b.Login(); err != nil {
-		t.Fatal(err)
-	}
+	b, _ := addedDevice(t, srv.URL, a, acct)
 
 	got := make(chan []client.Notification, 1)
 	go func() {
