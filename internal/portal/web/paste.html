@@ -33,8 +33,14 @@
 
   <section id="ready" hidden>
     <p class="lede" id="ready-note"></p>
-    <div id="password-row" hidden>
-      <label for="password">This message is password protected.</label>
+    <!-- SHOWN BEFORE THE BUTTON, ALWAYS. Nothing can tell this page whether
+         a message has a password until it has the sealed blob, and getting
+         the blob is the POST that uses a one-time message up — so a field that
+         appeared once the password turned out to be needed appeared after
+         the only chance to type it. The server cannot be asked either: a
+         password it knew about is a password it could switch off. -->
+    <div id="password-row">
+      <label for="password">Password, if the sender gave you one</label>
       <input type="password" id="password" autocomplete="off" spellcheck="false">
     </div>
     <button id="reveal">Show me the message</button>

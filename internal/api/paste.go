@@ -19,10 +19,11 @@ import (
 //
 // The server never sees a key. The 128-bit key lives in the URL fragment,
 // which browsers do not send, so every blob here is opaque to the process
-// serving it. A password, where one is used, is stretched with Argon2id IN THE
-// BROWSER and mixed into the HKDF input -- it is never a flag the server
-// checks, because a server-gated password is a password the server can turn
-// off.
+// serving it. A password, where one is used, is stretched with PBKDF2-SHA512
+// IN THE BROWSER (WebCrypto has no Argon2id; the blob's KDF byte and cost say
+// which, under the MAC -- see internal/portal/web/paste.js) and mixed into the
+// HKDF input -- it is never a flag the server checks, because a server-gated
+// password is a password the server can turn off.
 
 const (
 	// The longest a paste may be readable. A "one-time" link that is still

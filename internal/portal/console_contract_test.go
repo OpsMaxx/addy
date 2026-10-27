@@ -373,3 +373,24 @@ func TestHiddenBeatsEveryDisplayRuleOnEveryPage(t *testing.T) {
 			"Without it every element the scripts hide goes on rendering.")
 	}
 }
+
+func TestThePasswordIsAskedForBeforeTheMessageIsUsedUp(t *testing.T) {
+	// The page cannot know a message has a password until it holds the sealed
+	// blob, and fetching that is the POST that burns a one-time message. The
+	// field used to appear only after decryption failed — after the only
+	// chance to type into it.
+	page := readWeb(t, "paste.html")
+	row := regexp.MustCompile(`<div[^>]*id="password-row"[^>]*>`).FindString(page)
+	if row == "" {
+		t.Fatal("paste.html has no #password-row")
+	}
+	if bareHidden.MatchString(row) {
+		t.Errorf("#password-row starts hidden: %s", row)
+	}
+	if strings.Index(page, `id="password"`) > strings.Index(page, `id="reveal"`) {
+		t.Error("the password field comes after the button that burns the message")
+	}
+	if strings.Contains(readWeb(t, "paste.js"), "$('password-row').hidden") {
+		t.Error("paste.js toggles #password-row; it has to be there before the burn, not after")
+	}
+}

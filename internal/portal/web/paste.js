@@ -224,7 +224,6 @@ async function main() {
         // The message is gone from the server either way -- the POST consumed
         // it. Saying so matters: a reader who thinks they can retry will keep
         // trying a link that no longer exists.
-        $('password-row').hidden = false
         fail(
           password ? 'That password is wrong' : 'This message needs a password',
           'The message has already been taken off the relay, so this page is the only chance to open it. Ask the sender for the password and for a new link.'
