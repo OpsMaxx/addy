@@ -1,4 +1,4 @@
-// The operator console: every person and every account on this relay.
+// The operator console: every person and every sync group on this relay.
 //
 // Its own page, reached deliberately from your own console, because the two
 // answer different questions. Signing in as an ordinary member of somebody
@@ -67,14 +67,15 @@ async function loadUsers(me) {
         if (!u.blocked) {
           // Said in full: blocking stops somebody signing in and getting new
           // invites. It does not stop their devices syncing, because those
-          // hold the keys and this relay was never what made the account
+          // hold the keys and this relay was never what made the sync group
           // theirs.
+          const groups = u.accounts === 1 ? 'sync group keeps' : 'sync groups keep'
           const ok = window.confirm(
             `Block ${who}?\n\n` +
-              `They will not be able to sign in here or get new invites. ` +
-              `Their ${u.accounts} existing account${u.accounts === 1 ? ' keeps' : 's keep'} working — ` +
-              `their devices hold the keys, and this relay is not what makes those accounts theirs. ` +
-              `To stop those, delete the accounts below.`
+              `They are signed out now and will not be able to sign in here or get new invites. ` +
+              `Their ${u.accounts} existing ${groups} working — ` +
+              `their devices hold the keys, and this relay is not what makes those groups theirs. ` +
+              `To stop syncing, delete the sync group below.`
           )
           if (!ok) return
         }
@@ -108,12 +109,14 @@ async function loadAccounts(me) {
     const tr = document.createElement('tr')
 
     const owner = document.createElement('td')
-    // Blank rather than invented. An account registered with an invite that
-    // named nobody belongs to nobody until somebody claims it, and writing
-    // "unknown" would suggest the relay had lost track of something it never
-    // knew.
-    owner.textContent = a.owner || '—'
+    // `owner` is whatever names the person — email, else the provider's
+    // name, else their id, the same order the People table uses — so an
+    // empty one means exactly one thing: a group registered with an invite
+    // from this page, which named nobody. Said in words rather than a dash,
+    // because a dash read as "the owner has no email" as easily as "nobody".
+    owner.textContent = a.owner || 'nobody'
     owner.className = a.owner ? '' : 'fine'
+    if (!a.owner) owner.title = 'Created from an operator invite. Not linked to any sign-in, so only you can see or delete it.'
 
     const quota = cell(a.quotaBytes ? bytes(a.quotaBytes) : 'unlimited')
 
@@ -123,10 +126,10 @@ async function loadAccounts(me) {
     const setQuota = document.createElement('button')
     setQuota.className = 'button ghost small'
     setQuota.textContent = 'Quota'
-    setQuota.setAttribute('aria-label', `Set the quota for account ${a.accountId}`)
+    setQuota.setAttribute('aria-label', `Set the quota for sync group ${a.accountId}`)
     setQuota.addEventListener('click', async () => {
       const answer = window.prompt(
-        'Quota in megabytes for this account. 0 means unlimited.',
+        'Quota in megabytes for this sync group. 0 means unlimited.',
         a.quotaBytes ? String(Math.round(a.quotaBytes / 1024 / 1024)) : '0'
       )
       if (answer === null) return
@@ -150,14 +153,14 @@ async function loadAccounts(me) {
     const del = document.createElement('button')
     del.className = 'button ghost small danger'
     del.textContent = 'Delete'
-    del.setAttribute('aria-label', `Delete account ${a.accountId}`)
+    del.setAttribute('aria-label', `Delete sync group ${a.accountId}`)
     del.addEventListener('click', async () => {
       // Said in full before it happens. This cannot decrypt anything first, so
       // there is no version of it that produces readable data for the person
       // losing it — their own devices are the only way to get anything out,
       // and after this there is nothing to get it out of.
       const ok = window.confirm(
-        `Delete account ${a.accountId}?\n\n` +
+        `Delete sync group ${a.accountId}?\n\n` +
           `Everything this relay holds for it goes: ${a.rosterEntries} ` +
           `roster entr${a.rosterEntries === 1 ? 'y' : 'ies'} and ${bytes(a.usedBytes)} of sealed data. ` +
           `This relay cannot read any of it, so it cannot be exported first, and it cannot be undone.\n\n` +

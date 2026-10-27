@@ -376,6 +376,32 @@ func TestHiddenBeatsEveryDisplayRuleOnEveryPage(t *testing.T) {
 	}
 }
 
+func TestTheLeadCardFollowsTheCountBothWays(t *testing.T) {
+	// The card was decided once at load and its losing half REMOVED. Deleting
+	// your only sync group then left no invite button anywhere, under an empty
+	// state saying "create an invite above"; and a device registering from
+	// OpsMaxx while the tab sat in the background left it offering a first
+	// device to somebody who had one. Both halves have to survive in the page
+	// and be repainted whenever the count is read again.
+	js := readWeb(t, "console.js")
+	for _, id := range []string{"mint-mine-row", "pair-steps", "operator-made"} {
+		if strings.Contains(js, `$('`+id+`').remove()`) {
+			t.Errorf("console.js removes #%s; a later load cannot bring it back", id)
+		}
+		if !regexp.MustCompile(`\$\('` + id + `'\)\.hidden = !?first`).MatchString(js) {
+			t.Errorf("console.js does not paint #%s from the count", id)
+		}
+	}
+	if !strings.Contains(js, "paintLead(await loadMine())") {
+		t.Error("deleting a sync group re-reads the count without repainting the card drawn from it")
+	}
+	for _, ev := range []string{"'focus'", "'visibilitychange'"} {
+		if !strings.Contains(js, "addEventListener("+ev) {
+			t.Errorf("console.js does not re-read on %s; a device registered in OpsMaxx is not noticed", ev)
+		}
+	}
+}
+
 func TestThePasswordIsAskedForBeforeTheMessageIsUsedUp(t *testing.T) {
 	// The page cannot know a message has a password until it holds the sealed
 	// blob, and fetching that is the POST that burns a one-time message. The
@@ -394,6 +420,45 @@ func TestThePasswordIsAskedForBeforeTheMessageIsUsedUp(t *testing.T) {
 	}
 	if strings.Contains(readWeb(t, "paste.js"), "$('password-row').hidden") {
 		t.Error("paste.js toggles #password-row; it has to be there before the burn, not after")
+	}
+}
+
+func TestTheCopyUsesTheNamingContract(t *testing.T) {
+	// "Sync group" is the server's grouping, a roster entry is not a device,
+	// and the app's page is "Sync & devices" with one pairing code. Each
+	// phrase below shipped saying otherwise.
+	for _, c := range []struct{ file, phrase, why string }{
+		{"console.html", "one per invite", "the store refuses a second sync group to anybody who has one"},
+		{"console.html", "server can count", "the relay cannot count devices"},
+		{"console.html", "Type the code into the new machine", "name the app's button: Type a code from another device"},
+		{"relay.html", "every device on it", "the relay lists sync groups, not devices"},
+		{"relay.html", "a device count", "it is a roster-entry count"},
+		{"relay.html", "No accounts yet", "they are sync groups"},
+		{"relay.js", "existing account", "they are sync groups"},
+		{"relay.js", "Delete account", "they are sync groups"},
+		{"relay.js", "|| '—'", "a dash reads as 'no email' as easily as 'nobody'"},
+		{"index.html", "That creates your account", "it sets up a first device and a sync group"},
+		{"index.html", "needs an invite from whoever runs", "signing in gets you your own first-device invite"},
+		{"console-kit.js", "this relay was restarted, or you were signed in for more than eight hours. Sign in again to carry on.'", "a blocked member is told the relay restarted"},
+	} {
+		if strings.Contains(readWeb(t, c.file), c.phrase) {
+			t.Errorf("%s still says %q: %s", c.file, c.phrase, c.why)
+		}
+	}
+	for _, c := range []struct{ file, phrase string }{
+		{"console.html", "Sync &amp; devices"},
+		{"console.html", "Show a code on this device"},
+		{"console.html", "I already use OpsMaxx on another machine"},
+		{"console.html", "Type a code from another device"},
+		{"console.html", "pairing code"},
+		{"index.html", `href="/console"`},
+		{"console-kit.js", "no longer lets this account sign in"},
+		{"relay.html", "belongs to no sign-in"},
+		{"console.html", `id="operator-made"`},
+	} {
+		if !strings.Contains(readWeb(t, c.file), c.phrase) {
+			t.Errorf("%s no longer says %q", c.file, c.phrase)
+		}
 	}
 }
 
