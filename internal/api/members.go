@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/opsmaxx/addy/internal/protocol"
 	"github.com/opsmaxx/addy/internal/store"
@@ -292,6 +293,21 @@ func (a *authState) stillServing(r authedRequest) error {
 
 // settle applies a stored entry to the live sessions of the device it names.
 //
+// EndAccount ends every session of an account the operator has deleted.
+//
+// Deleting the rows is not enough on its own: a session lives here, in memory,
+// for twelve hours, and one opened before the deletion would otherwise keep
+// answering as a member of a sync group that no longer exists.
+func (s *Server) EndAccount(account string) {
+	s.auth.mu.Lock()
+	defer s.auth.mu.Unlock()
+	for k, v := range s.auth.sessions {
+		if strings.EqualFold(v.account, account) {
+			delete(s.auth.sessions, k)
+		}
+	}
+}
+
 // A REVOKE ENDS THEM, which is what PROTOCOL.md §9.5 means by "the server stops
 // serving it": a session lasts twelve hours, and a laptop revoked for being
 // lost should not keep syncing until the token happens to expire. They keep

@@ -324,3 +324,27 @@ func TestALoginBoundToAnotherTLSKeyIsRefused(t *testing.T) {
 		t.Errorf("a login bound to this relay's key = %d, want 200", got)
 	}
 }
+
+// AN OPERATOR'S DELETE ENDS THE SESSIONS TOO. The rows are gone either way; a
+// session opened before the delete must not keep answering for twelve hours.
+func TestDeletingAnAccountEndsItsOpenSessions(t *testing.T) {
+	srv, db, a := instanceWithAPI(t)
+	c := client.New(srv.URL, true)
+	if _, err := c.Register("quiet-otter-41", invite(t, db)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Login(); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := callStatus(t, c, http.MethodGet, "/v1/roster", nil); code != http.StatusOK {
+		t.Fatalf("before the delete the session answered %d", code)
+	}
+	id := hex.EncodeToString(c.Account[:])
+	if err := db.DeleteAccount(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	a.EndAccount(strings.ToUpper(id))
+	if code, _ := callStatus(t, c, http.MethodGet, "/v1/roster", nil); code != http.StatusUnauthorized {
+		t.Errorf("a session of a deleted account answered %d, want 401", code)
+	}
+}

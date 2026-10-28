@@ -270,7 +270,7 @@ func Run(ctx context.Context, cfg Config) error {
 		Signup:       operator.SignupPolicy(cfg.Signup),
 	}
 	if opCfg.Enabled() {
-		admin := adminFor(db)
+		admin := adminFor(db, apiServer.EndAccount)
 		operator.New(opCfg, admin.(operator.Store)).Routes(mux, admin)
 		log.Info("operator portal: sign-in is configured",
 			"issuer", cfg.OIDCIssuer, "redirect", operatorBase+"/admin/callback")
@@ -622,9 +622,13 @@ func (a overlayAdapter) Mint(ctx context.Context, device []byte, controlURL stri
 // because the two have different jobs: the store's `Accounts` returns
 // `time.Time` and the portal serves JSON, and a store that started formatting
 // timestamps for a web page would be a store with a view layer in it.
-type storeAdmin struct{ db *store.DB }
+// end is told about every account deleted, so its open sessions go with it.
+type storeAdmin struct {
+	db  *store.DB
+	end func(accountID string)
+}
 
-func adminFor(db *store.DB) operator.Admin { return storeAdmin{db} }
+func adminFor(db *store.DB, end func(string)) operator.Admin { return storeAdmin{db, end} }
 
 // UpsertUser crosses the same seam as the rest of this adapter: the store's
 // User carries more than the sign-in needs, and the operator package should
@@ -725,7 +729,11 @@ func (s storeAdmin) SetQuota(ctx context.Context, accountID string, bytes int64)
 }
 
 func (s storeAdmin) DeleteAccount(ctx context.Context, accountID string) error {
-	return translate(s.db.DeleteAccount(ctx, accountID))
+	if err := s.db.DeleteAccount(ctx, accountID); err != nil {
+		return translate(err)
+	}
+	s.end(accountID)
+	return nil
 }
 
 func (s storeAdmin) Accounts(ctx context.Context) ([]operator.AccountView, error) {
