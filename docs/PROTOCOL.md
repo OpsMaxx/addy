@@ -1,14 +1,16 @@
 # addy protocol — v1 (M1 spine)
 
 **Status: normative for M1. Written 2026-09-17 against `docs/DESIGN.md` and
-`THREAT_MODEL.md`, before any crypto code exists.** The design says "written
+`THREAT_MODEL.md`, before any crypto code existed; both ends implement it
+now.** The design says "written
 protocol spec with test vectors, before code" and "M1 is the gate"; this is that
 document. Where `DESIGN.md` left something open, this file closes it and says so
 — every such decision is listed in §14 rather than buried where a reviewer has
 to find it.
 
-Two independent implementations (Go on the server and the client daemon,
-TypeScript in the OpsMaxx renderer) must interoperate byte for byte. Everything
+Two programs must interoperate byte for byte: the relay, and the OpsMaxx
+sidecar `addyd`, which does all of the client's sealing and signing from a vendored
+copy of `internal/protocol` — the app's TypeScript seals, opens and signs nothing. Everything
 below is therefore stated as bytes, not as intent. Test vectors that a Go test
 consumes directly are in `internal/protocol/testdata/vectors.json`; §13 says what
 is in it and how it was generated.

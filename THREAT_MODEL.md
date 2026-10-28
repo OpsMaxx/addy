@@ -1,9 +1,9 @@
 # addy threat model
 
-**Status: written at M-0, 2026-09-17, against `docs/DESIGN.md`. Nothing is
-implemented yet, so every statement below describes what the design commits to,
-not what has been built and tested.** This file is updated as each milestone
-lands, and a claim here that the code does not yet honour is a bug in this file.
+**Status: checked against the code on 2026-10-29 — addy 0.1.4 and its client,
+OpsMaxx 0.59.1.** Where the design commits to something that is not built yet,
+this file says so next to the claim; everything else describes what ships. A
+claim here that the code does not honour is a bug in this file.
 
 This document exists because the product's entire pitch is a negative claim —
 "the server does not learn your secrets" — and a negative claim that is not
@@ -22,15 +22,17 @@ different blast radii and the same sentence is not true of both.
 
 | | **Relay-only** | **Relay plus service deployment** |
 |---|---|---|
-| Needs the Docker socket | No | **Yes — and the Docker socket is host root** |
+| Touches Docker | No | **The services run in Docker, and Docker access is host root** |
 | What a full compromise yields | Ciphertext, metadata, plaintext preferences | All of that, **plus host root**, plus every credential of every service addy deployed |
 | Recommended | The default | Run it on a **different box** from the relay |
 
-Services are **off by default**, and enabling them says this in plain words at
-the switch, not in a document nobody opens. addy reaches Docker through a proxy
-restricted to the endpoints it actually uses — which is a speed bump, not a
-security boundary against an attacker who already has code execution, and this
-document says so rather than claiming otherwise.
+The relay process itself never talks to Docker. Services are **off until you
+install one**: `addy service list` prints what each one costs before you choose,
+and `addy service install` only writes compose files and starts nothing — you
+read them, then run them. Those files reach Docker through a proxy restricted to
+the endpoints a deployment uses, which is a speed bump, not a security boundary
+against an attacker who already has code execution, and the file it writes says
+so rather than claiming otherwise.
 
 Everything below describes the **relay-only** case unless it says otherwise.
 
@@ -44,12 +46,14 @@ object store, and the binary addy serves.
 ### They learn
 
 - **How many devices you have**, each one's IP address, and when it is online.
-- **The size and change history of every encrypted collection** — not its
-  contents, but "the vault changed four times on Tuesday" is real information.
+- **The name, size and change history of every encrypted collection** —
+  `servers`, `vault`, `tunnels` and so on — not its contents, but "the vault
+  changed four times on Tuesday" is real information.
 - **Which of your devices talk to each other, and when.**
-- **Your plaintext preferences** — theme, terminal font size, colour scheme,
-  panel sizes. These are deliberately plaintext so a brand-new device can show a
-  usable-looking app before any pairing has happened.
+- **No preferences today.** The design allows a short list of plaintext
+  preferences — theme, terminal font — so a brand-new device could look right
+  before pairing (`internal/profile`). No relay endpoint stores them and OpsMaxx
+  sends none; if that changes, this line changes with it.
 - **Device public keys.** Unavoidable: authenticating a login requires them.
 
 This is the honest cost of using a relay at all. It is minimised, never exported
@@ -95,11 +99,19 @@ disclosure one. But a device restoring from scratch cannot tell an old copy from
 a current one except by comparing the roster hash against a device you still
 have.
 
-Mitigations the design commits to: every sealed payload carries a signed
-monotonic counter *inside* the ciphertext and clients refuse to go backwards;
-recovery ends in a **mandatory device review**; the printed recovery card carries
-the roster head hash and device count at print time, giving you an out-of-band
-anchor.
+What the client does about it:
+
+- Every sealed object carries a counter *inside* the ciphertext. It is bound by
+  the AEAD under the account key, not signed — any device on the account can
+  write one, the relay cannot. Each device keeps the highest counter it has seen
+  for every object, through resyncs and re-keys, and refuses anything lower.
+- Recovery shows the **Account fingerprint** — words derived from the roster
+  head — *before* it adds anything, and asks you to compare them with another of
+  your devices. It ends on a device list review.
+- **Not built yet:** the printed recovery card that would carry the roster head
+  and device count as an anchor for when no other device survives. Until it
+  ships, a recovery with no second device to compare against trusts the relay's
+  roster.
 
 ### 2. Serve you a modified web portal
 
@@ -112,9 +124,10 @@ Two rules follow, both absolute:
 - **The recovery phrase is entered in the OpsMaxx desktop app and nowhere else.**
   No browser, ever, on any page, for any reason. The portal has no field for it,
   and a page asking for it is by definition an attack.
-- **The roster head hash is compared between two OpsMaxx windows**, never read
-  from the portal and never from `addy status` — both are software the attacker
-  controls. An integrity check reported by the thing being checked is not a check.
+- **The roster head is compared between two OpsMaxx devices**, as the Account
+  fingerprint words on Sync & devices — never read from the portal, which is
+  software the attacker controls. An integrity check reported by the thing being
+  checked is not a check.
 
 The portal also ships **no service worker**, because one would survive both
 `addy panic` and `addy reset --hard` and quietly outlive the remediation meant to
@@ -152,8 +165,9 @@ keeps the old epoch key and everything it already downloaded.
 
 **A revoked device that never comes online again is never wiped.** Revocation
 reaches a machine when that machine next connects. For a machine that does not,
-full-disk encryption is the control that matters, and addy says so at the button
-rather than letting "revoke" be read as "wipe".
+full-disk encryption is the control that matters. The Remove button says that a
+machine kept offline never hears, and that a stolen one also needs the account
+key changed, rather than letting "remove" be read as "wipe".
 
 ---
 
@@ -171,6 +185,13 @@ ciphertext addy never opens, so the phrase reconstructs everything *except* vaul
 contents, which still need the master password you already know. Two secrets,
 each doing the job it was designed for.
 
+**What never left the old machine is not recovered either.** A server's or
+database's password, key path and its link to a vault entry are kept in that
+machine's own keychain and do not sync, so neither a second device nor a
+recovery brings them back. CI connections, VPN profiles and env secrets refer
+to the vault from the synced record, and do come back once the vault is
+unlocked.
+
 ---
 
 ## The admin boundary
@@ -179,12 +200,35 @@ An admin holds **availability and identity** power, never **confidentiality**.
 
 They can delete a user, invite one, change configuration, and see metadata —
 device count, bytes used, last seen. They can see no collection, no transfer and
-no paste, because none of it is decryptable to them. "Remove user" deletes that
-user's prefix and revokes their tokens; it cannot decrypt anything first, so it
-is a deletion and not an export, and the UI says so.
+no paste, because none of it is decryptable to them. Deleting a sync group
+removes everything stored for it and ends its open sessions; it cannot decrypt
+anything first, so it is a deletion and not an export, and the console says so.
 
 There is no organisation-level account recovery and there will not be. It is a
 deliberate backdoor and the exact inverse of the roster's premise.
+
+---
+
+## Known gaps
+
+Open in this release, each one deliberately listed rather than left to be found.
+
+- **First contact is trust-on-first-use.** Creating an account and the pairing
+  rendezvous trust the relay's TLS key the first time; every later connection
+  is pinned to it.
+- **The request signature covers the method, path and body, not the query
+  string.** TLS and the login's channel binding stop a third party; the relay
+  itself is the party that could exploit it, and it already chooses what to
+  answer.
+- **A removed device keeps its overlay node.** Removing a device ends its relay
+  sessions, but its headscale node, if it joined the overlay, stays until it is
+  deleted there.
+- **A cloned machine is the same device.** A disk image, a VM clone or a
+  migration tool that copies the keychain produces a second machine the roster
+  cannot tell from the first.
+- **Restoring a relay from backup rewinds it.** To your devices that looks
+  exactly like a rollback attack, and they refuse it rather than accept it.
+  Nothing yet repairs a restored relay from the devices that are ahead of it.
 
 ---
 
