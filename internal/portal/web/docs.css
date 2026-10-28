@@ -1,0 +1,239 @@
+/* ---------------------------------------------------------------------------
+   docs.css: the /docs pages, rendered from the repository's Markdown.
+
+   portal.css owns the tokens, the type scale, .topbar, .brand and .button.
+   This file adds the two-column layout and the typography of rendered
+   Markdown, and restates none of it. No hex values: every colour is a token,
+   so the light theme follows from portal.css.
+   --------------------------------------------------------------------------- */
+
+.topbar,
+.docs,
+.docs-foot {
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-inline: var(--sp-5);
+}
+
+.topbar {
+  margin-block: 0;
+  padding-block: var(--sp-6) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.topbar nav {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.topbar .brand {
+  font-size: var(--fs-lead);
+  color: var(--text);
+}
+
+.docs {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: var(--sp-10);
+  padding-block: var(--sp-8) var(--sp-12);
+}
+
+.docs-nav ul {
+  position: sticky;
+  top: var(--sp-6);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.docs-nav a {
+  display: block;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--fs-fine);
+}
+
+.docs-nav a:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.docs-nav a[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* portal.css gives every <main> a centred column; here the grid owns that. */
+main.docs-body {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.docs-lede {
+  color: var(--text-muted);
+  font-size: var(--fs-lead);
+  margin-bottom: var(--sp-6);
+}
+
+.docs-index {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.docs-index a {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  text-decoration: none;
+  color: var(--text);
+}
+
+.docs-index a:hover {
+  border-color: var(--accent-border);
+}
+
+.docs-index span {
+  color: var(--text-muted);
+  font-size: var(--fs-fine);
+}
+
+/* ---- Rendered Markdown -------------------------------------------------- */
+
+.docs-article {
+  max-width: 48rem;
+}
+
+.docs-article h1 {
+  margin-bottom: var(--sp-5);
+}
+
+.docs-article h2 {
+  margin-top: var(--sp-10);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.docs-article h3 {
+  font-size: var(--fs-body);
+  margin-top: var(--sp-8);
+}
+
+.docs-article h4 {
+  font-size: var(--fs-fine);
+  margin: var(--sp-6) 0 var(--sp-2);
+}
+
+/* A linked heading needs space above it when it is the target. */
+.docs-article :is(h1, h2, h3, h4) {
+  scroll-margin-top: var(--sp-6);
+}
+
+.docs-article ul,
+.docs-article ol {
+  padding-left: var(--sp-6);
+  margin: 0 0 var(--sp-4);
+}
+
+.docs-article li + li {
+  margin-top: var(--sp-1);
+}
+
+.docs-article :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+
+.docs-article pre {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-4);
+  overflow-x: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  line-height: 1.5;
+}
+
+.docs-article blockquote {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
+  border-left: 3px solid var(--accent-border);
+  color: var(--text-muted);
+}
+
+.docs-article hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--sp-8) 0;
+}
+
+/* Tables scroll inside themselves rather than widening the page. */
+.docs-article table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-fine);
+}
+
+.docs-article th,
+.docs-article td {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.docs-article th {
+  background: var(--bg-elevated);
+  text-align: left;
+}
+
+.docs-article td[align='right'],
+.docs-article th[align='right'] {
+  text-align: right;
+}
+
+.docs-article td[align='center'],
+.docs-article th[align='center'] {
+  text-align: center;
+}
+
+.docs-source {
+  margin-top: var(--sp-10);
+  font-size: var(--fs-fine);
+}
+
+.docs-foot {
+  padding-block: var(--sp-6);
+  color: var(--text-faint);
+  font-size: var(--fs-caption);
+  border-top: 1px solid var(--border-subtle);
+}
+
+@media (max-width: 760px) {
+  .docs {
+    grid-template-columns: 1fr;
+    gap: var(--sp-6);
+  }
+
+  .docs-nav ul {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+  }
+}

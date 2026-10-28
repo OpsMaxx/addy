@@ -7,6 +7,7 @@ require (
 	github.com/blinklabs-io/go-bip39 v0.2.0
 	github.com/caddyserver/certmagic v0.25.4
 	github.com/pion/turn/v5 v5.1.2
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.57.0
 	golang.org/x/text v0.42.0
 	gopkg.in/yaml.v3 v3.0.1

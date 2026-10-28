@@ -108,6 +108,16 @@ func Handler(cfg Config) (http.Handler, error) {
 	// it loads.
 	mux.Handle("GET /p/{id}", page(sub, "paste.html"))
 
+	// The documentation, rendered from the repository's own files. Behind -ui
+	// with the front page: what a stranger finds at this address is the
+	// operator's choice, and a console-only relay offers none of it.
+	docs, err := docsHandler(cfg.Version)
+	if err != nil {
+		return nil, err
+	}
+	mux.Handle("GET /docs", docs)
+	mux.Handle("GET /docs/", docs)
+
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		index, err := fs.ReadFile(sub, "index.html")
