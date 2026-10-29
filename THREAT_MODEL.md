@@ -1,7 +1,7 @@
 # addy threat model
 
-**Status: checked against the code on 2026-10-29 — addy 0.1.4 and its client,
-OpsMaxx 0.59.1.** Where the design commits to something that is not built yet,
+**Status: checked against the code on 2026-10-29 — addy 0.1.6 and its client,
+OpsMaxx 0.59.2.** Where the design commits to something that is not built yet,
 this file says so next to the claim; everything else describes what ships. A
 claim here that the code does not honour is a bug in this file.
 
@@ -185,12 +185,21 @@ ciphertext addy never opens, so the phrase reconstructs everything *except* vaul
 contents, which still need the master password you already know. Two secrets,
 each doing the job it was designed for.
 
-**What never left the old machine is not recovered either.** A server's or
-database's password, key path and its link to a vault entry are kept in that
-machine's own keychain and do not sync, so neither a second device nor a
-recovery brings them back. CI connections, VPN profiles and env secrets refer
-to the vault from the synced record, and do come back once the vault is
-unlocked.
+**What never left the old machine is not recovered either.** A password, key
+file or connection string saved only in a machine's keychain stays on that
+machine, so neither a second device nor a recovery brings it back. OpsMaxx
+offers to move such credentials into the vault, from the vault itself.
+
+A credential that is a vault entry does come back, once the vault is unlocked:
+since OpsMaxx 0.59.2 a server or database record carries which entry it uses (a
+pointer, never the value), as CI connections, VPN profiles and env secrets
+already did. Because a record that names both an address and a credential is
+exactly what a compromised device on the account would forge, a link that
+arrives new or changed is not used on a device until a person there confirms
+it, and the question names the entry it would release; background checks skip
+it until then. The relay cannot write such a record at all: records are sealed
+under the account key, so it can only withhold one, and an older copy it
+replays is refused.
 
 ---
 
