@@ -177,6 +177,11 @@ type errorBody struct {
 func (s *Server) fail(w http.ResponseWriter, status int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	// A 5xx is the relay's own fault and is logged; nothing else here records
+	// it, and an operator should not have to reproduce one to see it.
+	if status >= http.StatusInternalServerError {
+		s.Log.Error("request failed", "status", status, "err", err)
+	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorBody{Error: err.Error()})
 }
@@ -214,7 +219,11 @@ func statusFor(err error) int {
 		// same answer: this group cannot be created.
 		errors.Is(err, store.ErrHasAccount):
 		return http.StatusConflict
-	case errors.Is(err, store.ErrNoAccount), errors.Is(err, store.ErrNoObject):
+	// A conflict already resolved is 404, not a fault: the same chooser opens
+	// on every device, and the second one to press a button finds the copy
+	// gone. Clients read 404 as "already done".
+	case errors.Is(err, store.ErrNoAccount), errors.Is(err, store.ErrNoObject),
+		errors.Is(err, store.ErrNoConflict):
 		return http.StatusNotFound
 	case errors.Is(err, store.ErrMailboxFull):
 		// 507 like a quota, because it is the same shape of problem from the

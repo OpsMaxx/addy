@@ -129,6 +129,13 @@ func TestResolvingAConflictStopsItBeingOffered(t *testing.T) {
 	if done.StatusCode != http.StatusNoContent {
 		t.Fatalf("resolve answered %s", done.Status)
 	}
+	// The same chooser opens on every device; the second to press the button
+	// finds the copy gone. That is "already done", which clients read from 404.
+	twice := post(t, c, "/v1/conflicts/"+itoa(out.Conflicts[0].ID)+"/resolve", nil)
+	twice.Body.Close()
+	if twice.StatusCode != http.StatusNotFound {
+		t.Errorf("resolving an already-resolved copy answered %s, want 404", twice.Status)
+	}
 
 	// Leaving it would mean the chooser offering the same decision forever.
 	again, _ := c.RawRequest(http.MethodGet, "/v1/conflicts", nil)

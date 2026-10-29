@@ -23,8 +23,11 @@ var (
 	// not send If-Match" and "the one you sent is stale" need different
 	// answers: the first is a client bug, the second is a real conflict that a
 	// user may have to resolve.
-	ErrObjectExists  = errors.New("store: that object exists; send If-Match to replace it")
-	ErrNoObject      = errors.New("store: no such object")
+	ErrObjectExists = errors.New("store: that object exists; send If-Match to replace it")
+	ErrNoObject     = errors.New("store: no such object")
+	// ErrNoConflict is a conflict copy that is not there -- most often because
+	// another device of the account already resolved it.
+	ErrNoConflict    = errors.New("store: no such conflict")
 	ErrInviteUnknown = errors.New("store: no such invite")
 	ErrInviteSpent   = errors.New("store: that invite has already been spent")
 	ErrInviteExpired = errors.New("store: that invite has expired")

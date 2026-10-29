@@ -92,7 +92,7 @@ func (d *DB) ResolveConflict(ctx context.Context, accountID string, id int64) er
 			return fmt.Errorf("store: resolving a conflict: %w", err)
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return fmt.Errorf("store: no conflict %d for this account", id)
+			return fmt.Errorf("%w: %d for this account", ErrNoConflict, id)
 		}
 		return nil
 	})
