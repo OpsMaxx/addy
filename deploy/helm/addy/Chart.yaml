@@ -5,8 +5,8 @@ type: application
 # The chart's own version. Bumped when the TEMPLATES change, which is not the
 # same event as a new addy release -- appVersion tracks that, and conflating
 # the two means a chart fix cannot ship without pretending to be a new server.
-version: 0.1.5
-appVersion: "0.1.5"
+version: 0.1.6
+appVersion: "0.1.6"
 home: https://github.com/OpsMaxx/addy
 sources:
   - https://github.com/OpsMaxx/addy
